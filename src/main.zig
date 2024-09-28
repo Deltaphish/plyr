@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const id3 = @import("id3.zig");
+const mp3 = @import("mp3.zig");
 
 pub fn main() !void {
     // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
@@ -38,9 +39,47 @@ pub fn main() !void {
         try stdout.print("after tag ({x}): {x}\n", .{ tag.header.size + 10, buffer[(tag.header.size + 10)..(tag.header.size + 30)] });
         try stdout.print("total frame size :: {d}\n diff :: {d}", .{ total_frame_size, @as(i64, tag.header.size) - total_frame_size });
 
+        try bw.flush();
+
+        const mp3_data = buffer[(tag.header.size + 10)..];
+
+        const mp3_header = try mp3.MP3_parse_header(mp3_data);
+
+        switch (mp3_header.mpeg_version) {
+            mp3.MPEG_VERSION.MPEG_25 => {
+                try stdout.print("MP3 :: MPEG_VERSION: 2.5\n", .{});
+            },
+            mp3.MPEG_VERSION.MPEG_2 => {
+                try stdout.print("MP3 :: MPEG_VERSION: 2.0\n", .{});
+            },
+            mp3.MPEG_VERSION.MPEG_1 => {
+                try stdout.print("MP3 :: MPEG_VERSION: 1\n", .{});
+            },
+        }
+
+        try stdout.print("MP3 :: CRC: {}\n", .{mp3_header.crc});
+        try stdout.print("MP3 :: BITRATE: {d} bps\n", .{mp3_header.bit_rate});
+        try stdout.print("MP3 :: SAMPLE_RATE: {d} hz\n", .{mp3_header.freq});
+        try stdout.print("MP3 :: Padding: {}\n", .{mp3_header.padding});
+        switch (mp3_header.mode) {
+            mp3.CHANNEL_MODE.DUAL => {
+                try stdout.print("MP3 :: Channel Mode: DUAL\n", .{});
+            },
+            mp3.CHANNEL_MODE.JOINT => {
+                try stdout.print("MP3 :: Channel Mode: JOINT\n", .{});
+            },
+            mp3.CHANNEL_MODE.STEREO => {
+                try stdout.print("MP3 :: Channel Mode: STEREO\n", .{});
+            },
+            mp3.CHANNEL_MODE.MONO => {
+                try stdout.print("MP3 :: Channel Mode: MONO\n", .{});
+            },
+        }
+        try stdout.print("MP3 :: Copyright: {}\n", .{mp3_header.copyright});
+        try stdout.print("MP3 :: Original: {}\n", .{mp3_header.original});
+        try stdout.print("MP3 :: Emphasis: {}\n", .{mp3_header.emphasis});
         tag.frames.deinit();
     }
-
     try bw.flush();
 }
 
