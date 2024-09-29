@@ -6,6 +6,31 @@ const MP3_ERROR = error{
     UnsupportedSamplingRate,
     InvalidBitrate,
     InvalidMPEGVersion,
+    OutOfMemory,
+};
+
+const MP3_FRAME = struct {
+    header: MP3_HEADER,
+    data: []const u8,
+};
+
+const MP3_HEADER = struct {
+    crc: bool,
+    padding: bool,
+    priv: bool,
+    original: bool,
+    emphasis: u32,
+    intensity_stereo: bool,
+    ms_stereo: bool,
+    copyright: bool,
+    mpeg_version: MPEG_VERSION,
+    bit_rate: u32,
+    freq: u32,
+    mode: CHANNEL_MODE,
+
+    pub fn frame_size(self: *const MP3_HEADER) usize {
+        return (144 * self.bit_rate / self.freq) + if (self.padding) @as(usize, 1) else @as(usize, 0);
+    }
 };
 
 pub const CHANNEL_MODE = enum {
@@ -27,7 +52,59 @@ pub const MPEG_VERSION = enum(u8) {
     MPEG_1 = 0x18,
 };
 
-const MP3_HEADER = struct { crc: bool, padding: bool, priv: bool, original: bool, emphasis: u32, intensity_stereo: bool, ms_stereo: bool, copyright: bool, mpeg_version: MPEG_VERSION, bit_rate: u32, freq: u32, mode: CHANNEL_MODE };
+pub fn MP3_parse_frames(data: []const u8, alloc: std.mem.Allocator) MP3_ERROR!std.ArrayList(MP3_FRAME) {
+    var frames = std.ArrayList(MP3_FRAME).init(alloc);
+    var remainingBuffer = data;
+    while (remainingBuffer.len > 4) {
+        const header = try MP3_parse_header(data);
+        if (remainingBuffer.len < 4 + header.frame_size()) {
+            break;
+        }
+        const frame_data = remainingBuffer[4..header.frame_size()];
+
+        const new_frame = frames.addOne() catch return MP3_ERROR.OutOfMemory;
+        new_frame.* = MP3_FRAME{ .header = header, .data = frame_data };
+        remainingBuffer = remainingBuffer[header.frame_size()..];
+    }
+    return frames;
+}
+
+pub fn MP3_debug_frame(frame: MP3_FRAME) void {
+    switch (frame.header.mpeg_version) {
+        MPEG_VERSION.MPEG_25 => {
+            std.debug.print("MP3 :: MPEG_VERSION: 2.5\n", .{});
+        },
+        MPEG_VERSION.MPEG_2 => {
+            std.debug.print("MP3 :: MPEG_VERSION: 2.0\n", .{});
+        },
+        MPEG_VERSION.MPEG_1 => {
+            std.debug.print("MP3 :: MPEG_VERSION: 1\n", .{});
+        },
+    }
+
+    std.debug.print("MP3 :: CRC: {}\n", .{frame.header.crc});
+    std.debug.print("MP3 :: BITRATE: {d} bps\n", .{frame.header.bit_rate});
+    std.debug.print("MP3 :: SAMPLE_RATE: {d} hz\n", .{frame.header.freq});
+    std.debug.print("MP3 :: Padding: {}\n", .{frame.header.padding});
+    switch (frame.header.mode) {
+        CHANNEL_MODE.DUAL => {
+            std.debug.print("MP3 :: Channel Mode: DUAL\n", .{});
+        },
+        CHANNEL_MODE.JOINT => {
+            std.debug.print("MP3 :: Channel Mode: JOINT\n", .{});
+        },
+        CHANNEL_MODE.STEREO => {
+            std.debug.print("MP3 :: Channel Mode: STEREO\n", .{});
+        },
+        CHANNEL_MODE.MONO => {
+            std.debug.print("MP3 :: Channel Mode: MONO\n", .{});
+        },
+    }
+    std.debug.print("MP3 :: Copyright: {}\n", .{frame.header.copyright});
+    std.debug.print("MP3 :: Original: {}\n", .{frame.header.original});
+    std.debug.print("MP3 :: Emphasis: {}\n", .{frame.header.emphasis});
+    std.debug.print("MP3 :: Framesize: {d} bytes\n", .{frame.header.frame_size()});
+}
 
 pub fn MP3_parse_header(data: []const u8) MP3_ERROR!MP3_HEADER {
     if (data[0] != 0xFF or data[1] < 0xE0) {

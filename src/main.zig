@@ -14,7 +14,7 @@ pub fn main() !void {
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout = bw.writer();
 
-    const files = [_][]const u8{"./data1.mp3"};
+    const files = [_][]const u8{"./data2.mp3"};
 
     var alloc = std.heap.GeneralPurposeAllocator(.{}){};
 
@@ -26,6 +26,7 @@ pub fn main() !void {
         try stdout.print("Reading file {s}\n", .{file});
 
         const tag = try id3.parse_id3_tag(&buffer, alloc.allocator());
+        defer tag.frames.deinit();
 
         try stdout.print("Found ID3 tag \n  version :: {d}.{d}\n  size :: {d} bytes\n flags :: {b}\n", .{ tag.header.major_version, tag.header.minor_version, tag.header.size, tag.header.flags });
 
@@ -39,46 +40,18 @@ pub fn main() !void {
         try stdout.print("after tag ({x}): {x}\n", .{ tag.header.size + 10, buffer[(tag.header.size + 10)..(tag.header.size + 30)] });
         try stdout.print("total frame size :: {d}\n diff :: {d}", .{ total_frame_size, @as(i64, tag.header.size) - total_frame_size });
 
-        try bw.flush();
-
         const mp3_data = buffer[(tag.header.size + 10)..];
 
-        const mp3_header = try mp3.MP3_parse_header(mp3_data);
+        try bw.flush();
 
-        switch (mp3_header.mpeg_version) {
-            mp3.MPEG_VERSION.MPEG_25 => {
-                try stdout.print("MP3 :: MPEG_VERSION: 2.5\n", .{});
-            },
-            mp3.MPEG_VERSION.MPEG_2 => {
-                try stdout.print("MP3 :: MPEG_VERSION: 2.0\n", .{});
-            },
-            mp3.MPEG_VERSION.MPEG_1 => {
-                try stdout.print("MP3 :: MPEG_VERSION: 1\n", .{});
-            },
+        const frames = try mp3.MP3_parse_frames(mp3_data, alloc.allocator());
+        defer frames.deinit();
+
+        for (frames.items) |f| {
+            mp3.MP3_debug_frame(f);
         }
 
-        try stdout.print("MP3 :: CRC: {}\n", .{mp3_header.crc});
-        try stdout.print("MP3 :: BITRATE: {d} bps\n", .{mp3_header.bit_rate});
-        try stdout.print("MP3 :: SAMPLE_RATE: {d} hz\n", .{mp3_header.freq});
-        try stdout.print("MP3 :: Padding: {}\n", .{mp3_header.padding});
-        switch (mp3_header.mode) {
-            mp3.CHANNEL_MODE.DUAL => {
-                try stdout.print("MP3 :: Channel Mode: DUAL\n", .{});
-            },
-            mp3.CHANNEL_MODE.JOINT => {
-                try stdout.print("MP3 :: Channel Mode: JOINT\n", .{});
-            },
-            mp3.CHANNEL_MODE.STEREO => {
-                try stdout.print("MP3 :: Channel Mode: STEREO\n", .{});
-            },
-            mp3.CHANNEL_MODE.MONO => {
-                try stdout.print("MP3 :: Channel Mode: MONO\n", .{});
-            },
-        }
-        try stdout.print("MP3 :: Copyright: {}\n", .{mp3_header.copyright});
-        try stdout.print("MP3 :: Original: {}\n", .{mp3_header.original});
-        try stdout.print("MP3 :: Emphasis: {}\n", .{mp3_header.emphasis});
-        tag.frames.deinit();
+        std.debug.print("Found {d} frames", .{frames.items.len});
     }
     try bw.flush();
 }
