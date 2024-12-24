@@ -15,6 +15,12 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    const verbose_mp3_headers = b.option(bool, "verbose-mp3-headers", "Print mp3 frame headers") orelse false;
+    const verbose_id3 = b.option(bool, "verbose-id3", "Print id3 tag") orelse false;
+    const options = b.addOptions();
+    options.addOption(bool, "verbose_id3", verbose_id3);
+    options.addOption(bool, "verbose_mp3_headers", verbose_mp3_headers);
+
     const lib = b.addStaticLibrary(.{
         .name = "plyr",
         // In this case the main source file is merely a path, however, in more
@@ -23,6 +29,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    lib.root_module.addOptions("config", options);
 
     // This declares intent for the library to be installed into the standard
     // location when the user invokes the "install" step (the default step when
@@ -35,6 +43,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    exe.root_module.addOptions("config", options);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default

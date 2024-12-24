@@ -21,6 +21,18 @@ pub const ID3_HEADER = struct {
     size: u28,
 };
 
+pub fn debug_id3_tag(tag: ID3_TAG) void {
+    std.debug.print("Found ID3 tag \n  version = {d}.{d}\n  size = {d} bytes\n flags = {b}\n", .{ tag.header.major_version, tag.header.minor_version, tag.header.size, tag.header.flags });
+
+    var total_frame_size: i64 = 0;
+
+    for (tag.frames.items) |frame| {
+        total_frame_size += frame.size + 10;
+        std.debug.print("{s} = \"{s}\"\n", .{ frame.id, frame.data });
+    }
+    std.debug.print("total frame size = {d}\npadding = {d}\n", .{ total_frame_size, @as(i64, tag.header.size) - total_frame_size });
+}
+
 pub const ID3_FRAME = struct { id: *const [4]u8, size: u32, flags: u16, data: []const u8 };
 
 pub fn parse_id3_tag(data: []const u8, alloc: std.mem.Allocator) ID3_Error!ID3_TAG {
