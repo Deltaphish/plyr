@@ -2,14 +2,14 @@ const std = @import("std");
 const config = @import("config");
 
 const id3 = @import("id3.zig");
-const mp3 = @import("mp3.zig");
+const mp3_unpack = @import("mp3_unpacker.zig");
+const mp3_decode = @import("mp3_decoder.zig");
 
 pub fn main() !void {
     const stdout_file = std.io.getStdOut().writer();
     var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
 
-    const files = [_][]const u8{"./data1.mp3"};
+    const files = [_][]const u8{"./data2.mp3"};
 
     var alloc = std.heap.GeneralPurposeAllocator(.{}){};
 
@@ -17,8 +17,6 @@ pub fn main() !void {
 
     for (files) |file| {
         _ = try std.fs.cwd().readFile(file, &buffer);
-
-        try stdout.print("Reading file {s}\n", .{file});
 
         const tag = try id3.parse_id3_tag(&buffer, alloc.allocator());
         defer tag.frames.deinit();
@@ -29,18 +27,14 @@ pub fn main() !void {
 
         const mp3_data = buffer[(tag.header.size + 10)..];
 
-        try bw.flush();
+        var decoder = try mp3_decode.DecoderState.init(mp3_data, alloc.allocator());
 
-        const frames = try mp3.MP3_parse_frames(mp3_data, alloc.allocator());
-        defer frames.deinit();
-
-        if (config.verbose_mp3_headers) {
-            for (frames.items) |f| {
-                mp3.MP3_debug_frame(f);
-            }
+        while (try decoder.next(alloc.allocator())) |frame| {
+            try bw.writer().print("Data size {}\n", .{frame.data.len});
+            try bw.writer().print("Sampling rate {}\n", .{frame.header.freq});
+            try bw.flush();
+            alloc.allocator().free(frame.data);
         }
-
-        std.debug.print("Found {d} frames", .{frames.items.len});
     }
     try bw.flush();
 }
