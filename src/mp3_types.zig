@@ -3,6 +3,12 @@ pub const MP3_FRAME = struct {
     sideInfo: MP3_SIDE_INFO,
 };
 
+pub const LogicalFrame = struct {
+    header: MP3_HEADER,
+    sideInfo: MP3_SIDE_INFO,
+    data: []u8,
+};
+
 pub const MP3_ERROR = error{
     InvalidHeader,
     UnsupportedFormat,
@@ -33,26 +39,13 @@ pub const MP3_HEADER = struct {
     }
 };
 
-pub const MP3_SIDE_INFO_TYPE = enum {
-    mpeg1_stereo,
-
-    pub fn jsonStringify(self: MP3_SIDE_INFO_TYPE, output: anytype) !void {
-        switch (self) {
-            .mpeg1_stereo => |block| {
-                try output.print("\"mpeg1_stereo\":{}", .{block});
-                return;
-            },
-        }
-    }
-};
-
-pub const MP3_SIDE_INFO = union(MP3_SIDE_INFO_TYPE) {
-    mpeg1_stereo: MP3_DATA_MPEG1_STEREO,
+pub const MP3_SIDE_INFO = union(enum) {
+    mpeg1_stereo: SideInfoMpeg1Stereo,
 
     pub fn getSize(self: MP3_SIDE_INFO) usize {
         switch (self) {
             .mpeg1_stereo => {
-                return @bitSizeOf(MP3_DATA_MPEG1_STEREO);
+                return @bitSizeOf(SideInfoMpeg1Stereo);
             },
         }
     }
@@ -66,7 +59,7 @@ pub const MP3_SIDE_INFO = union(MP3_SIDE_INFO_TYPE) {
     }
 };
 
-pub const MP3_DATA_MPEG1_STEREO = struct {
+pub const SideInfoMpeg1Stereo = struct {
     main_data_begin: u9,
     private_bits: u5,
     scfsi: [2][4]bool,
@@ -78,29 +71,24 @@ pub const MP3_GRANULE_MPEG1 = struct {
     big_values: u9,
     global_gain: u8,
     scalefac_compress: u4,
-    block_data: MP3_BLOCK,
+    block_info: BlockInfo,
     preflag: bool,
     scalefac_scale: bool,
     count1table_select: bool,
 };
 
-pub const MP3_BLOCK_TYPE = enum {
-    long_block,
-    constelation_block,
-};
+pub const BlockInfo = union(enum) {
+    long_block: LongBlockInfo,
+    windowed_block: WindowedBlockInfo,
 
-pub const MP3_BLOCK = union(enum) {
-    long_block: MP3_LONG_BLOCK,
-    constelation_block: MP3_CONSTELATION_BLOCK,
-
-    pub fn jsonStringify(self: MP3_BLOCK, output: anytype) !void {
+    pub fn jsonStringify(self: BlockInfo, output: anytype) !void {
         switch (self) {
             .long_block => |block| {
                 try output.write(.{ .type = "long_block", .data = block });
                 return;
             },
-            .constelation_block => |block| {
-                try output.write(.{ .type = "constelation_block", .data = block });
+            .windowed_block => |block| {
+                try output.write(.{ .type = "windowed_block", .data = block });
                 //try output.print("\"constelation\":{}", .{block});
                 return;
             },
@@ -108,13 +96,13 @@ pub const MP3_BLOCK = union(enum) {
     }
 };
 
-pub const MP3_LONG_BLOCK = struct {
+pub const LongBlockInfo = struct {
     table_select: [3]u5,
     region0_count: u4,
     region1_count: u3,
 };
 
-pub const MP3_CONSTELATION_BLOCK = struct {
+pub const WindowedBlockInfo = struct {
     block_type: u2,
     mixed_block_flag: bool,
     table_select: [2]u5,

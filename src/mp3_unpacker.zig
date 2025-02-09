@@ -47,7 +47,8 @@ fn parse_mpeg1_stereo_data(data: []const u8) !mp3_t.MP3_SIDE_INFO {
             const scalefac_compress = try b.read(u4);
             const window_switching_flag = try b.read(bool);
 
-            var block: mp3_t.MP3_BLOCK = undefined;
+            //TODO use initializer
+            var block: mp3_t.BlockInfo = undefined;
 
             if (window_switching_flag) {
                 const block_type = try b.read(u2);
@@ -61,7 +62,7 @@ fn parse_mpeg1_stereo_data(data: []const u8) !mp3_t.MP3_SIDE_INFO {
                     subblock_gain[window] = try b.read(u3);
                 }
 
-                block = @unionInit(mp3_t.MP3_BLOCK, "constelation_block", mp3_t.MP3_CONSTELATION_BLOCK{
+                block = @unionInit(mp3_t.BlockInfo, "windowed_block", mp3_t.WindowedBlockInfo{
                     .block_type = block_type,
                     .mixed_block_flag = mixed_block_flag,
                     .table_select = table_select,
@@ -75,7 +76,7 @@ fn parse_mpeg1_stereo_data(data: []const u8) !mp3_t.MP3_SIDE_INFO {
                 const region0_count = try b.read(u4);
                 const region1_count = try b.read(u3);
 
-                block = @unionInit(mp3_t.MP3_BLOCK, "long_block", mp3_t.MP3_LONG_BLOCK{
+                block = @unionInit(mp3_t.BlockInfo, "long_block", mp3_t.LongBlockInfo{
                     .table_select = table_select,
                     .region0_count = region0_count,
                     .region1_count = region1_count,
@@ -90,7 +91,7 @@ fn parse_mpeg1_stereo_data(data: []const u8) !mp3_t.MP3_SIDE_INFO {
                 .big_values = big_values,
                 .global_gain = global_gain,
                 .scalefac_compress = scalefac_compress,
-                .block_data = block,
+                .block_info = block,
                 .preflag = preflag,
                 .scalefac_scale = scalefac_scale,
                 .count1table_select = count1table_select,
@@ -98,7 +99,7 @@ fn parse_mpeg1_stereo_data(data: []const u8) !mp3_t.MP3_SIDE_INFO {
         }
     }
 
-    return mp3_t.MP3_SIDE_INFO{ .mpeg1_stereo = mp3_t.MP3_DATA_MPEG1_STEREO{
+    return mp3_t.MP3_SIDE_INFO{ .mpeg1_stereo = mp3_t.SideInfoMpeg1Stereo{
         .main_data_begin = main_data_begin,
         .private_bits = private_bits,
         .scfsi = scfsi,
