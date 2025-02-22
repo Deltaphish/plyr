@@ -1,53 +1,45 @@
 const std = @import("std");
 const hm = @import("./huffman_table.zig");
 
-// TODO: Refactor into huffman and mp3 specific tables
 // TODO: Write huffman decoder
 
-const TABLE_CUTTOFF = 8;
-const SUBTABLE_SIZE = (1 << (TABLE_CUTTOFF));
-const INIT_BUFF_SIZE = 256;
+const r4_huffman_decoder = initalize_r4_decoder();
+const bigval_huffman_decoder = initialize_bigvalue_decoder();
 
-const HuffmanError = error{
-    OutOfSubTables,
-};
-
-const subtables_r4 = initalize_r4_subtables();
-const subtables_bigval = initialize_bigval_subtables();
-
-fn initalize_r4_subtables() [2][SUBTABLE_SIZE]Entry(R4) {
+fn initalize_r4_decoder() hm.HuffmanDecoder(R4, 2) {
     // Needed for comptime to not complain about depth
     @setEvalBranchQuota(10000);
-    var subtables = [_][SUBTABLE_SIZE]Entry(R4){[_]Entry(R4){.none} ** SUBTABLE_SIZE} ** 2;
-    var alloc = SubTableAlloc(R4).init(subtables[0..], 2);
-    populateSubtable(R4, &alloc, 0, TABLE_A[0..]);
-    populateSubtable(R4, &alloc, 1, TABLE_B[0..]);
-    return subtables;
+    const decoder = hm.HuffmanDecoder(R4, 2).init(&[_]hm.HuffmanTable(R4){
+        hm.HuffmanTable(R4){ .rows = TABLE_A[0..], .id = 0 },
+        hm.HuffmanTable(R4){ .rows = TABLE_B[0..], .id = 0 },
+    });
+    return decoder;
 }
 
-fn initialize_bigval_subtables() [130][SUBTABLE_SIZE]Entry(BigValue) {
+fn initialize_bigvalue_decoder() hm.HuffmanDecoder(BigValue, 129) {
     // Needed for comptime to not complain about depth
     @setEvalBranchQuota(1000000);
-    var subtables = [_][SUBTABLE_SIZE]Entry(BigValue){[_]Entry(BigValue){.none} ** SUBTABLE_SIZE} ** 130;
-    var alloc = SubTableAlloc(BigValue).init(subtables[0..], 14);
-    populateSubtable(BigValue, &alloc, 1, TABLE_1[0..]);
-    populateSubtable(BigValue, &alloc, 2, TABLE_2[0..]);
-    populateSubtable(BigValue, &alloc, 3, TABLE_3[0..]);
-    populateSubtable(BigValue, &alloc, 4, TABLE_5[0..]);
-    populateSubtable(BigValue, &alloc, 5, TABLE_6[0..]);
-    populateSubtable(BigValue, &alloc, 6, TABLE_7[0..]);
-    populateSubtable(BigValue, &alloc, 7, TABLE_8[0..]);
-    populateSubtable(BigValue, &alloc, 8, TABLE_9[0..]);
-    populateSubtable(BigValue, &alloc, 9, TABLE_10[0..]);
-    populateSubtable(BigValue, &alloc, 10, TABLE_11[0..]);
-    populateSubtable(BigValue, &alloc, 11, TABLE_12[0..]);
-    populateSubtable(BigValue, &alloc, 12, TABLE_13[0..]);
-    populateSubtable(BigValue, &alloc, 13, TABLE_15[0..]);
-    return subtables;
+
+    const decoder = hm.HuffmanDecoder(BigValue, 129).init(&[_]hm.HuffmanTable(BigValue){
+        hm.HuffmanTable(BigValue){ .id = 1, .rows = TABLE_1[0..] },
+        hm.HuffmanTable(BigValue){ .id = 2, .rows = TABLE_2[0..] },
+        hm.HuffmanTable(BigValue){ .id = 3, .rows = TABLE_3[0..] },
+        hm.HuffmanTable(BigValue){ .id = 5, .rows = TABLE_5[0..] },
+        hm.HuffmanTable(BigValue){ .id = 6, .rows = TABLE_6[0..] },
+        hm.HuffmanTable(BigValue){ .id = 7, .rows = TABLE_7[0..] },
+        hm.HuffmanTable(BigValue){ .id = 8, .rows = TABLE_8[0..] },
+        hm.HuffmanTable(BigValue){ .id = 9, .rows = TABLE_9[0..] },
+        hm.HuffmanTable(BigValue){ .id = 10, .rows = TABLE_10[0..] },
+        hm.HuffmanTable(BigValue){ .id = 11, .rows = TABLE_11[0..] },
+        hm.HuffmanTable(BigValue){ .id = 12, .rows = TABLE_12[0..] },
+        hm.HuffmanTable(BigValue){ .id = 13, .rows = TABLE_13[0..] },
+        hm.HuffmanTable(BigValue){ .id = 15, .rows = TABLE_15[0..] },
+    });
+    return decoder;
 }
 
 test "Initalize R4 subtables correctly" {
-    for (subtables_r4) |subtable| {
+    for (r4_huffman_decoder.subtables) |subtable| {
         for (subtable) |slot| {
             try std.testing.expect(
                 slot != .none,
@@ -57,140 +49,11 @@ test "Initalize R4 subtables correctly" {
 }
 
 test "Initalize BigVal subtables correctly" {
-    for (subtables_bigval[1..], 1..) |subtable, i| {
-        std.debug.print("Checking {}\n", .{i});
+    for (bigval_huffman_decoder.subtables[1..]) |subtable| {
         for (subtable) |slot| {
             try std.testing.expect(
                 slot != .none,
             );
-        }
-    }
-}
-
-fn Entry(comptime V: anytype) type {
-    return union(enum) {
-        val: hm.HuffmanValue(V),
-        link: u32,
-        none: void,
-    };
-}
-
-fn SubTableAlloc(T: anytype) type {
-    return struct {
-        subtables: [][SUBTABLE_SIZE]Entry(T),
-        subtable_it: u32,
-
-        fn init(buffer: [][SUBTABLE_SIZE]Entry(T), alloc_start: u32) @This() {
-            return @This(){ .subtables = buffer, .subtable_it = alloc_start };
-        }
-
-        fn alloc(self: *@This()) HuffmanError!u32 {
-            const addr = self.subtable_it;
-            self.subtable_it += 1;
-            return addr;
-        }
-
-        fn get(self: @This(), ix: u32) []Entry(T) {
-            // Index is within bounds
-            std.debug.assert(ix < self.subtables.len);
-            // Index does not access unallocated slices
-            std.debug.assert(ix < self.subtable_it);
-            return &self.subtables[ix];
-        }
-    };
-}
-
-test "SubTableAlloc sanity test" {
-    var buffer = [_][SUBTABLE_SIZE]Entry(u8){[_]Entry(u8){.none} ** SUBTABLE_SIZE} ** 10;
-    var alloc = SubTableAlloc(u8).init(&buffer, 0);
-
-    const table_1 = try alloc.alloc();
-    const table_2 = try alloc.alloc();
-    try std.testing.expect(table_1 != table_2);
-
-    var t1 = alloc.get(table_1);
-    t1[0] = Entry(u8){ .val = hm.HuffmanValue(u8){ .val = 255, .len = 1 } };
-
-    const t2 = alloc.get(table_2);
-    try std.testing.expectEqual(t2[0], .none);
-}
-
-fn Frame(comptime T: anytype) type {
-    return struct {
-        items: std.BoundedArray(hm.HuffmanCode(T), INIT_BUFF_SIZE),
-        subtable_addr: u32,
-
-        pub fn init(subtable_addr: u32) @This() {
-            return @This(){
-                .items = std.BoundedArray(hm.HuffmanCode(T), INIT_BUFF_SIZE).init(0) catch unreachable,
-                .subtable_addr = subtable_addr,
-            };
-        }
-    };
-}
-
-fn populateSubtable(comptime T: type, alloc: *SubTableAlloc(T), table_ix: u8, nodes: []const hm.HuffmanCode(T)) void {
-    // Recursive functions in zig is still a grey area, so instead of making innerPopulateSubtable recursive
-    // we make the stack and memory allocations explicit.
-    // This function is a wrapper of innerPopulateSubtable, taking care of bookkeeping (stack, allocs, etc)
-
-    // TODO: Finetune magic number for stack
-    const StackType = std.BoundedArray(Frame(T), INIT_BUFF_SIZE);
-
-    var stack = StackType.init(0) catch unreachable;
-    const inital_ba = std.BoundedArray(hm.HuffmanCode(T), INIT_BUFF_SIZE).fromSlice(nodes) catch @panic("to many in table, need to increase alloc");
-    const inital_stack = Frame(T){ .items = inital_ba, .subtable_addr = table_ix };
-    stack.append(inital_stack) catch @panic("Waka waka");
-
-    while (stack.popOrNull()) |frame| {
-        innerPopulateSubtable(T, alloc, frame.subtable_addr, frame.items.buffer[0..frame.items.len], &stack);
-    }
-}
-
-fn innerPopulateSubtable(comptime T: type, alloc: *SubTableAlloc(T), subtable_addr: u32, nodes: []const hm.HuffmanCode(T), stack: *std.BoundedArray(Frame(T), INIT_BUFF_SIZE)) void {
-
-    // We don't have allocators, so sketchy maps it is;
-    var buckets = [_]?std.BoundedArray(hm.HuffmanCode(T), INIT_BUFF_SIZE){null} ** 255;
-
-    var subtable = alloc.get(subtable_addr);
-
-    for (nodes) |node| {
-        const data = node.getValue() orelse @panic("Trying to use a huffmancode with an uninitalized");
-        if (TABLE_CUTTOFF == data.len) {
-            subtable[node.code] = Entry(T){ .val = data };
-        } else if (TABLE_CUTTOFF > data.len) {
-            const wildcard_width: u3 = @intCast(TABLE_CUTTOFF - data.len);
-            for (0..(@as(u8, 1) << wildcard_width)) |wildcard| {
-                const key = (node.code << wildcard_width) | wildcard;
-                subtable[key] = Entry(T){ .val = data };
-            }
-        } else {
-            const delta: u5 = @intCast(data.len - TABLE_CUTTOFF);
-            const key = node.code >> delta;
-            if (buckets[key] == null) {
-                const linked_subtable = alloc.alloc() catch @panic("Out of subtables");
-                buckets[key] = std.BoundedArray(hm.HuffmanCode(T), INIT_BUFF_SIZE).init(0) catch unreachable;
-                subtable[key] = Entry(T){ .link = linked_subtable };
-            }
-            buckets[key].?.append(node) catch @panic("\nToo many children for one id, increase buckets child size\n");
-        }
-    }
-    for (buckets, 0..) |maybeBucket, i| {
-        if (maybeBucket) |bucket| {
-            const link = subtable[i].link;
-            var frame = Frame(T).init(link);
-            for (bucket.buffer[0..bucket.len]) |code| {
-                const c: hm.HuffmanCode(T) = code;
-                const val = c.val orelse @panic("AAAAAH");
-                const old_code = c.code;
-
-                const new_length = val.len - 8;
-                const new_code = ((@as(u32, 1) << (new_length)) - 1) & old_code;
-
-                const new_c = hm.HuffmanCode(T).init(new_code, new_length, val.val);
-                frame.items.append(new_c) catch @panic("Out of subtables");
-            }
-            stack.append(frame) catch @panic("Too many children for frame");
         }
     }
 }
@@ -248,21 +111,6 @@ const TABLE_A = [_]R4Code{
     R4Code.init(0b000011, 6, R4{ .v = 1, .w = 1, .x = 1, .y = 0 }),
     R4Code.init(0b000001, 6, R4{ .v = 1, .w = 1, .x = 1, .y = 1 }),
 };
-
-test "Parse table A to subtables" {
-    var buffer = [_][SUBTABLE_SIZE]Entry(R4){[_]Entry(R4){.none} ** SUBTABLE_SIZE} ** 10;
-    var alloc = SubTableAlloc(R4).init(&buffer, 1);
-
-    populateSubtable(R4, &alloc, 0, TABLE_A[0..]);
-    for (buffer[0], 0..) |field, i| {
-        if (field == .none) {
-            std.debug.print("Index {} is none", .{i});
-        }
-        try std.testing.expect(
-            field != .none,
-        );
-    }
-}
 
 const TABLE_B = [_]R4Code{
     R4Code.init(0b1111, 4, R4{ .v = 0, .w = 0, .x = 0, .y = 0 }),
