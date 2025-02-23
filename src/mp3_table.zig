@@ -3,6 +3,77 @@ const hm = @import("./huffman_table.zig");
 
 // TODO: Write huffman decoder
 
+const Decoder = struct {
+    buffer: []const u8,
+    bitOffset: u32,
+
+    pub fn init(bits: []const u8) @This() {
+        return @This(){ .buffer = bits, .bitOffset = 0 };
+    }
+
+    fn readByte(self: *@This()) ?u8 {
+        if (self.bitOffset >= self.buffer.len * 8) {
+            return null;
+        } else if (self.bitOffset % 8 == 0) {
+            defer self.bitOffset += 8;
+            return self.buffer[self.bitOffset / 8];
+        } else {
+            defer self.bitOffset += 8;
+            const first = self.buffer[self.bitOffset / 8];
+            var second: u8 = undefined;
+
+            if (self.bitOffset >= (self.buffer.len - 1) * 8) {
+                second = 0;
+            } else {
+                second = self.buffer[self.bitOffset / 8 + 1];
+            }
+
+            const padding_len: u3 = @intCast(self.bitOffset % 8);
+            return @intCast((first << padding_len) | (second >> (7 - (padding_len - 1))));
+        }
+    }
+
+    fn walkBack(self: *@This(), steps: u8) void {
+        std.debug.assert(self.bitOffset >= steps);
+        self.bitOffset -= steps;
+    }
+
+    pub fn readR4(self: *@This(), table_select: u8) ?R4 {
+        std.debug.assert(table_select < 2);
+        if (self.readByte()) |byte| {
+            var entry = r4_huffman_decoder.beginQuery(table_select, byte);
+            var depth: u32 = 0;
+            while (entry == .link and depth <= 10) : (depth += 1) {
+                const b = self.readByte() orelse return null;
+                entry = r4_huffman_decoder.queryLink(entry, b);
+            }
+            std.debug.assert(entry == .val);
+            const val = entry.val;
+            self.walkBack(8 - (val.len % 8));
+            return val.val;
+        }
+        return null;
+    }
+};
+
+test "decode R4 Values" {
+    // Encode
+    const buffer = [_]u8{ 0b10101000, 0 };
+    var decoder = Decoder.init(&buffer);
+
+    const v1 = decoder.readR4(0);
+    try std.testing.expect(v1 != null);
+    try std.testing.expectEqualDeep(v1.?, TABLE_A[0].getValue().?.val);
+
+    const v2 = decoder.readR4(0);
+    try std.testing.expect(v2 != null);
+    try std.testing.expectEqualDeep(v2.?, TABLE_A[1].getValue().?.val);
+
+    const v3 = decoder.readR4(0);
+    try std.testing.expect(v3 != null);
+    try std.testing.expectEqualDeep(v3.?, TABLE_A[11].getValue().?.val);
+}
+
 const r4_huffman_decoder = initalize_r4_decoder();
 const bigval_huffman_decoder = initialize_bigvalue_decoder();
 
@@ -11,7 +82,7 @@ fn initalize_r4_decoder() hm.HuffmanDecoder(R4, 2) {
     @setEvalBranchQuota(10000);
     const decoder = hm.HuffmanDecoder(R4, 2).init(&[_]hm.HuffmanTable(R4){
         hm.HuffmanTable(R4){ .rows = TABLE_A[0..], .id = 0 },
-        hm.HuffmanTable(R4){ .rows = TABLE_B[0..], .id = 0 },
+        hm.HuffmanTable(R4){ .rows = TABLE_B[0..], .id = 1 },
     });
     return decoder;
 }

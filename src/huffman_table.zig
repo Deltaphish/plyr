@@ -51,6 +51,23 @@ pub fn HuffmanDecoder(comptime T: type, comptime N_SUBTABLE: comptime_int) type 
             }
             return self;
         }
+
+        pub fn beginQuery(self: @This(), table_id: u32, byte: u8) Entry(T) {
+            std.debug.assert(self.table_ix[table_id] != std.math.maxInt(u32));
+            return self.query(self.table_ix[table_id], byte);
+        }
+        pub fn queryLink(self: @This(), link: Entry(T), byte: u8) Entry(T) {
+            std.debug.assert(link == .link);
+            return self.query(link.link, byte);
+        }
+
+        fn query(self: @This(), table_id: u32, byte: u8) Entry(T) {
+            const table = self.subtables[table_id];
+            switch (table[byte]) {
+                .val, .link => return table[byte],
+                .none => unreachable,
+            }
+        }
     };
 }
 
