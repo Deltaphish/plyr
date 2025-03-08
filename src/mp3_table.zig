@@ -1,55 +1,15 @@
 const std = @import("std");
 const hm = @import("./huffman_table.zig");
 
-// TODO: Write huffman decoder
-
-const Decoder = struct {
-    buffer: []const u8,
-    bitOffset: u32,
-
-    pub fn init(bits: []const u8) @This() {
-        return @This(){ .buffer = bits, .bitOffset = 0 };
-    }
-
-    fn walkBack(self: *@This(), steps: u8) void {
-        std.debug.assert(self.bitOffset >= steps);
-        self.bitOffset -= steps;
-    }
-
-    pub fn readR4(self: *@This(), table_select: u8) ?R4 {
-        std.debug.assert(table_select < 2);
-        if (self.readByte()) |byte| {
-            var entry = r4_huffman_decoder.beginQuery(table_select, byte);
-            var depth: u32 = 0;
-            while (entry == .link and depth <= 10) : (depth += 1) {
-                const b = self.readByte() orelse return null;
-                entry = r4_huffman_decoder.queryLink(entry, b);
-            }
-            std.debug.assert(entry == .val);
-            const val = entry.val;
-            self.walkBack(8 - (val.len % 8));
-            return val.val;
-        }
-        return null;
-    }
-};
-
 test "decode R4 Values" {
     // Encode
     const buffer = [_]u8{ 0b10101000, 0 };
-    var decoder = Decoder.init(&buffer);
+    const plaintext = [_]R4{ TABLE_A[0].getValue().?.val, TABLE_A[1].getValue().?.val, TABLE_A[11].getValue().?.val };
 
-    const v1 = decoder.readR4(0);
-    try std.testing.expect(v1 != null);
-    try std.testing.expectEqualDeep(v1.?, TABLE_A[0].getValue().?.val);
+    var dest = [_]R4{R4.default} ** 3;
 
-    const v2 = decoder.readR4(0);
-    try std.testing.expect(v2 != null);
-    try std.testing.expectEqualDeep(v2.?, TABLE_A[1].getValue().?.val);
-
-    const v3 = decoder.readR4(0);
-    try std.testing.expect(v3 != null);
-    try std.testing.expectEqualDeep(v3.?, TABLE_A[11].getValue().?.val);
+    try std.testing.expectEqual(3, r4_huffman_decoder.decode(0, buffer[0..], dest[0..]));
+    try std.testing.expectEqualSlices(R4, plaintext[0..], dest[0..]);
 }
 
 const r4_huffman_decoder = initalize_r4_decoder();
@@ -112,11 +72,15 @@ const R4 = struct {
     w: u1,
     x: u1,
     y: u1,
+
+    const default = R4{ .v = 0, .w = 0, .x = 0, .y = 0 };
 };
 
 const BigValue = struct {
     x: u4,
     y: u4,
+
+    const default = BigValue{ .x = 0, .y = 0 };
 };
 
 const LIN_TABLE = [_]u8{
