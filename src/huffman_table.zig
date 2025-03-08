@@ -1,26 +1,5 @@
-//! Decodes huffman encoded bitstreams through linked lookup tables
-//! The lookup tables are all of the size 2 ** 8, so all bytes are indexes into a table.
-//! The tables are populated as follows:
-//!
-//!     len(code) < TABLE_CUTOFF -> table[(code << len(padding)) | {0,1}^len(padding)] = val(code) ; where padding = TABLE_CUTOFF - len(code)
-//!     len(code) = TABLE_CUTOFF -> table[code] = val(code)
-//!     len(code) > TABLE_CUTOFF -> table[code[0..8]] = link to another table.
-//!
-//! This creates an 256-arry tree with depth ceil(max(len(code))/8).
-//! To decode:
-//!
-//! 1. offset = read 8 bits (padd with 0 if necessary)
-//! 2. if table[offset] == val
-//!         return val,
-//!    else
-//!         table = *link
-//!         goto 1.
-//!
-//! This means that codes <= TABLE_CUTOFF are faster to decode while larger codes require additional lookups.
-//! Given a huffman encoded stream with a good compression ratio the distribution of encountered code lengths is biased torwards shorter codes,
-//! thus average lookups should be correlated with compression ratio of the stream.
-
 const std = @import("std");
+const bit_reader = @import("./bit_reader.zig");
 
 const TABLE_CUTTOFF = 8;
 const SUBTABLE_SIZE = (1 << (TABLE_CUTTOFF));
@@ -30,6 +9,9 @@ pub fn HuffmanTable(comptime T: type) type {
     return struct {
         id: u32,
         rows: []const HuffmanCode(T),
+        pub fn init(id: u32, rows: []const HuffmanCode(T)) @This() {
+            return @This(){ .id = id, .rows = rows };
+        }
     };
 }
 
@@ -52,11 +34,11 @@ pub fn HuffmanDecoder(comptime T: type, comptime N_SUBTABLE: comptime_int) type 
             return self;
         }
 
-        pub fn beginQuery(self: @This(), table_id: u32, byte: u8) Entry(T) {
+        fn beginQuery(self: @This(), table_id: u32, byte: u8) Entry(T) {
             std.debug.assert(self.table_ix[table_id] != std.math.maxInt(u32));
             return self.query(self.table_ix[table_id], byte);
         }
-        pub fn queryLink(self: @This(), link: Entry(T), byte: u8) Entry(T) {
+        fn queryLink(self: @This(), link: Entry(T), byte: u8) Entry(T) {
             std.debug.assert(link == .link);
             return self.query(link.link, byte);
         }
@@ -68,7 +50,50 @@ pub fn HuffmanDecoder(comptime T: type, comptime N_SUBTABLE: comptime_int) type 
                 .none => unreachable,
             }
         }
+
+        pub fn decode(self: @This(), table_id: u32, bytes: []const u8, dest: []T) u32 {
+            var reader = bit_reader.BitReader.init(bytes);
+            var dest_it: u32 = 0;
+
+            while (reader.readByte()) |byte| {
+                var entry: Entry(T) = self.beginQuery(table_id, byte);
+                while (entry == .link) {
+                    const b = reader.readByte() orelse return dest_it;
+                    entry = self.queryLink(entry, b);
+                }
+                std.debug.assert(entry == .val);
+                const val = entry.val;
+                dest[dest_it] = val.val;
+                dest_it += 1;
+
+                if (!reader.walkForward(val.len) or dest_it >= dest.len) {
+                    return dest_it;
+                }
+            }
+
+            return dest_it;
+        }
     };
+}
+
+test "Decode u32s" {
+    const IntCode = HuffmanCode(u32);
+    const rows = [_]IntCode{
+        IntCode.init(0b1, 1, 1),
+        IntCode.init(0b001, 3, 2),
+        IntCode.init(0b01, 2, 3),
+        IntCode.init(0b000, 3, 4),
+    };
+
+    const table = HuffmanTable(u32).init(0, rows[0..]);
+
+    const plaintext = [_]u32{ 1, 2, 3, 3, 2, 1, 4 };
+    const bitstream = [_]u8{ 0b10010101, 0b00110000 };
+
+    var decoder = HuffmanDecoder(u32, 200).init(&[_]HuffmanTable(u32){table});
+    var dest = [_]u32{0} ** 7;
+    try std.testing.expectEqual(7, decoder.decode(0, bitstream[0..], dest[0..]));
+    try std.testing.expectEqualSlices(u32, plaintext[0..], dest[0..]);
 }
 
 const HuffmanError = error{

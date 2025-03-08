@@ -11,28 +11,6 @@ const Decoder = struct {
         return @This(){ .buffer = bits, .bitOffset = 0 };
     }
 
-    fn readByte(self: *@This()) ?u8 {
-        if (self.bitOffset >= self.buffer.len * 8) {
-            return null;
-        } else if (self.bitOffset % 8 == 0) {
-            defer self.bitOffset += 8;
-            return self.buffer[self.bitOffset / 8];
-        } else {
-            defer self.bitOffset += 8;
-            const first = self.buffer[self.bitOffset / 8];
-            var second: u8 = undefined;
-
-            if (self.bitOffset >= (self.buffer.len - 1) * 8) {
-                second = 0;
-            } else {
-                second = self.buffer[self.bitOffset / 8 + 1];
-            }
-
-            const padding_len: u3 = @intCast(self.bitOffset % 8);
-            return @intCast((first << padding_len) | (second >> (7 - (padding_len - 1))));
-        }
-    }
-
     fn walkBack(self: *@This(), steps: u8) void {
         std.debug.assert(self.bitOffset >= steps);
         self.bitOffset -= steps;
