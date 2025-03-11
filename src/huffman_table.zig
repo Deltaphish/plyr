@@ -20,18 +20,32 @@ pub fn HuffmanDecoder(comptime T: type, comptime N_SUBTABLE: comptime_int) type 
     return struct {
         subtables: [N_SUBTABLE][SUBTABLE_SIZE]Entry(T),
         table_ix: [64]u32, // TODO: Compute table size based on table count.
+        strategy: ?*const fn (table_id: u32, reader: *bit_reader.BitReader, val: T) T,
 
         pub fn init(tables: []const HuffmanTable(T)) @This() {
             var self = @This(){
                 .subtables = [_][SUBTABLE_SIZE]Entry(T){[_]Entry(T){.none} ** SUBTABLE_SIZE} ** N_SUBTABLE,
                 .table_ix = [_]u32{std.math.maxInt(u32)} ** 64,
+                .strategy = null,
             };
+
             var alloc = SubTableAlloc(T).init(self.subtables[0..]);
 
             for (tables) |table| {
                 self.table_ix[table.id] = populateSubtable(T, &alloc, table.rows);
             }
             return self;
+        }
+
+        pub fn init_with_strategy(strategy: *const fn (table_id: u32, reader: *bit_reader.BitReader, val: T) T, tables: []const HuffmanTable(T)) @This() {
+            var self = @This().init(tables);
+            self.strategy = strategy;
+            return self;
+        }
+
+        pub fn alias_table(self: *@This(), from: u32, to: u32) void {
+            std.debug.assert(self.table_ix[to] != std.math.maxInt(u32));
+            self.table_ix[from] = self.table_ix[to];
         }
 
         fn beginQuery(self: @This(), table_id: u32, byte: u8) Entry(T) {
@@ -45,10 +59,7 @@ pub fn HuffmanDecoder(comptime T: type, comptime N_SUBTABLE: comptime_int) type 
 
         fn query(self: @This(), table_id: u32, byte: u8) Entry(T) {
             const table = self.subtables[table_id];
-            switch (table[byte]) {
-                .val, .link => return table[byte],
-                .none => unreachable,
-            }
+            return table[byte];
         }
 
         pub fn decode(self: @This(), table_id: u32, bytes: []const u8, dest: []T) u32 {
@@ -56,19 +67,35 @@ pub fn HuffmanDecoder(comptime T: type, comptime N_SUBTABLE: comptime_int) type 
             var dest_it: u32 = 0;
 
             while (reader.readByte()) |byte| {
+                const start = reader.bit_cursor;
                 var entry: Entry(T) = self.beginQuery(table_id, byte);
+                var actual_length: u5 = 0;
                 while (entry == .link) {
+                    actual_length += 8;
+                    _ = reader.walkForward(8);
                     const b = reader.readByte() orelse return dest_it;
                     entry = self.queryLink(entry, b);
                 }
                 std.debug.assert(entry == .val);
-                const val = entry.val;
-                dest[dest_it] = val.val;
-                dest_it += 1;
+
+                var val = entry.val;
 
                 if (!reader.walkForward(val.len) or dest_it >= dest.len) {
                     return dest_it;
                 }
+
+                val.len += actual_length;
+
+                std.debug.print("\nExpected {} got {}\n", .{ reader.bit_cursor, start + val.len });
+                std.debug.assert(reader.bit_cursor == start + val.len);
+
+                if (self.strategy != null) {
+                    dest[dest_it] = self.strategy.?(table_id, &reader, val.val);
+                } else {
+                    dest[dest_it] = val.val;
+                }
+
+                dest_it += 1;
             }
 
             return dest_it;
@@ -82,15 +109,44 @@ test "Decode u32s" {
         IntCode.init(0b1, 1, 1),
         IntCode.init(0b001, 3, 2),
         IntCode.init(0b01, 2, 3),
-        IntCode.init(0b000, 3, 4),
+        IntCode.init(0b000000000, 9, 4),
     };
 
     const table = HuffmanTable(u32).init(0, rows[0..]);
 
     const plaintext = [_]u32{ 1, 2, 3, 3, 2, 1, 4 };
-    const bitstream = [_]u8{ 0b10010101, 0b00110000 };
+    const bitstream = [_]u8{ 0b10010101, 0b00110000, 0b00000000 };
 
     var decoder = HuffmanDecoder(u32, 200).init(&[_]HuffmanTable(u32){table});
+    var dest = [_]u32{0} ** 7;
+    try std.testing.expectEqual(7, decoder.decode(0, bitstream[0..], dest[0..]));
+    try std.testing.expectEqualSlices(u32, plaintext[0..], dest[0..]);
+}
+
+fn dummy_strat(_: u32, reader: *bit_reader.BitReader, val: u32) u32 {
+    if (val == 4) {
+        const extra = reader.readBits(2) orelse @panic("WWWW");
+        defer _ = reader.walkForward(2);
+        return val + extra;
+    }
+    return val;
+}
+
+test "Decode u32s with strategy" {
+    const IntCode = HuffmanCode(u32);
+    const rows = [_]IntCode{
+        IntCode.init(0b1, 1, 1),
+        IntCode.init(0b001, 3, 2),
+        IntCode.init(0b01, 2, 3),
+        IntCode.init(0b000, 3, 4),
+    };
+
+    const table = HuffmanTable(u32).init(0, rows[0..]);
+
+    const plaintext = [_]u32{ 1, 2, 3, 3, 2, 1, 7 };
+    const bitstream = [_]u8{ 0b10010101, 0b00110001, 0b10000000 };
+
+    var decoder = HuffmanDecoder(u32, 200).init_with_strategy(dummy_strat, &[_]HuffmanTable(u32){table});
     var dest = [_]u32{0} ** 7;
     try std.testing.expectEqual(7, decoder.decode(0, bitstream[0..], dest[0..]));
     try std.testing.expectEqualSlices(u32, plaintext[0..], dest[0..]);

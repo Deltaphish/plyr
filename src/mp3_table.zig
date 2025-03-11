@@ -1,5 +1,6 @@
 const std = @import("std");
 const hm = @import("./huffman_table.zig");
+const br = @import("bit_reader.zig");
 
 test "decode R4 Values" {
     // Encode
@@ -18,32 +19,56 @@ const bigval_huffman_decoder = initialize_bigvalue_decoder();
 fn initalize_r4_decoder() hm.HuffmanDecoder(R4, 2) {
     // Needed for comptime to not complain about depth
     @setEvalBranchQuota(10000);
-    const decoder = hm.HuffmanDecoder(R4, 2).init(&[_]hm.HuffmanTable(R4){
-        hm.HuffmanTable(R4){ .rows = TABLE_A[0..], .id = 0 },
-        hm.HuffmanTable(R4){ .rows = TABLE_B[0..], .id = 1 },
-    });
+    const decoder = hm.HuffmanDecoder(R4, 2).init_with_strategy(
+        r4_decoding_strategy,
+        &[_]hm.HuffmanTable(R4){
+            hm.HuffmanTable(R4){ .rows = TABLE_A[0..], .id = 0 },
+            hm.HuffmanTable(R4){ .rows = TABLE_B[0..], .id = 1 },
+        },
+    );
     return decoder;
 }
 
-fn initialize_bigvalue_decoder() hm.HuffmanDecoder(BigValue, 129) {
+fn initialize_bigvalue_decoder() hm.HuffmanDecoder(BigValue, 215) {
     // Needed for comptime to not complain about depth
     @setEvalBranchQuota(1000000);
 
-    const decoder = hm.HuffmanDecoder(BigValue, 129).init(&[_]hm.HuffmanTable(BigValue){
-        hm.HuffmanTable(BigValue){ .id = 1, .rows = TABLE_1[0..] },
-        hm.HuffmanTable(BigValue){ .id = 2, .rows = TABLE_2[0..] },
-        hm.HuffmanTable(BigValue){ .id = 3, .rows = TABLE_3[0..] },
-        hm.HuffmanTable(BigValue){ .id = 5, .rows = TABLE_5[0..] },
-        hm.HuffmanTable(BigValue){ .id = 6, .rows = TABLE_6[0..] },
-        hm.HuffmanTable(BigValue){ .id = 7, .rows = TABLE_7[0..] },
-        hm.HuffmanTable(BigValue){ .id = 8, .rows = TABLE_8[0..] },
-        hm.HuffmanTable(BigValue){ .id = 9, .rows = TABLE_9[0..] },
-        hm.HuffmanTable(BigValue){ .id = 10, .rows = TABLE_10[0..] },
-        hm.HuffmanTable(BigValue){ .id = 11, .rows = TABLE_11[0..] },
-        hm.HuffmanTable(BigValue){ .id = 12, .rows = TABLE_12[0..] },
-        hm.HuffmanTable(BigValue){ .id = 13, .rows = TABLE_13[0..] },
-        hm.HuffmanTable(BigValue){ .id = 15, .rows = TABLE_15[0..] },
-    });
+    var decoder = hm.HuffmanDecoder(BigValue, 215).init_with_strategy(
+        bigval_decoding_strategy,
+        &[_]hm.HuffmanTable(BigValue){
+            hm.HuffmanTable(BigValue){ .id = 1, .rows = TABLE_1[0..] },
+            hm.HuffmanTable(BigValue){ .id = 2, .rows = TABLE_2[0..] },
+            hm.HuffmanTable(BigValue){ .id = 3, .rows = TABLE_3[0..] },
+            hm.HuffmanTable(BigValue){ .id = 5, .rows = TABLE_5[0..] },
+            hm.HuffmanTable(BigValue){ .id = 6, .rows = TABLE_6[0..] },
+            hm.HuffmanTable(BigValue){ .id = 7, .rows = TABLE_7[0..] },
+            hm.HuffmanTable(BigValue){ .id = 8, .rows = TABLE_8[0..] },
+            hm.HuffmanTable(BigValue){ .id = 9, .rows = TABLE_9[0..] },
+            hm.HuffmanTable(BigValue){ .id = 10, .rows = TABLE_10[0..] },
+            hm.HuffmanTable(BigValue){ .id = 11, .rows = TABLE_11[0..] },
+            hm.HuffmanTable(BigValue){ .id = 12, .rows = TABLE_12[0..] },
+            hm.HuffmanTable(BigValue){ .id = 13, .rows = TABLE_13[0..] },
+            hm.HuffmanTable(BigValue){ .id = 15, .rows = TABLE_15[0..] },
+            hm.HuffmanTable(BigValue){ .id = 16, .rows = TABLE_16[0..] },
+            hm.HuffmanTable(BigValue){ .id = 24, .rows = TABLE_24[0..] },
+        },
+    );
+    decoder.alias_table(17, 16);
+    decoder.alias_table(18, 16);
+    decoder.alias_table(19, 16);
+    decoder.alias_table(20, 16);
+    decoder.alias_table(21, 16);
+    decoder.alias_table(22, 16);
+    decoder.alias_table(23, 16);
+
+    decoder.alias_table(25, 24);
+    decoder.alias_table(26, 24);
+    decoder.alias_table(27, 24);
+    decoder.alias_table(28, 24);
+    decoder.alias_table(29, 24);
+    decoder.alias_table(30, 24);
+    decoder.alias_table(31, 24);
+
     return decoder;
 }
 
@@ -68,23 +93,38 @@ test "Initalize BigVal subtables correctly" {
 }
 
 const R4 = struct {
-    v: u1,
-    w: u1,
-    x: u1,
-    y: u1,
+    v: i2,
+    w: i2,
+    x: i2,
+    y: i2,
 
     const default = R4{ .v = 0, .w = 0, .x = 0, .y = 0 };
 };
 
 const BigValue = struct {
-    x: u4,
-    y: u4,
+    x: i32,
+    y: i32,
 
     const default = BigValue{ .x = 0, .y = 0 };
 };
 
 const LIN_TABLE = [_]u8{
-    0 ** 15,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
     1,
     2,
     3,
@@ -103,6 +143,142 @@ const LIN_TABLE = [_]u8{
     13,
 };
 
+fn bigval_decoding_strategy(table_id: u32, reader: *br.BitReader, value: BigValue) BigValue {
+    var result = value;
+    const lin = LIN_TABLE[table_id];
+    if (lin != 0 and value.x == 15) {
+        const extra: i31 = @intCast((reader.readBits(lin) orelse return value));
+        result.x += extra;
+        _ = reader.walkForward(lin);
+    }
+    if (value.x != 0) {
+        const sign = reader.readBits(1) orelse return value;
+        _ = reader.walkForward(1);
+        if (sign == 1) {
+            result.x *= -1;
+        }
+    }
+    if (lin != 0 and value.y == 15) {
+        const extra: i31 = @intCast(reader.readBits(lin) orelse return value);
+        std.debug.print("\nFOOF {}\n", .{extra});
+        result.y += extra;
+        _ = reader.walkForward(lin);
+    }
+    if (value.y != 0) {
+        const sign = reader.readBits(1) orelse return value;
+        _ = reader.walkForward(1);
+        if (sign == 1) {
+            result.y *= -1;
+        }
+    }
+    return result;
+}
+
+test "bigval decoding strategy" {
+    const encoded = [_]u8{ 0b11110111, 0b10000000 };
+
+    const input = BigValue{ .x = 15, .y = 15 };
+    const expected = BigValue{ .x = 30, .y = 30 };
+
+    var reader = br.BitReader.init(encoded[0..]);
+
+    const decoded = bigval_decoding_strategy(19, &reader, input);
+
+    try std.testing.expectEqualDeep(expected, decoded);
+}
+
+fn r4_decoding_strategy(_: u32, reader: *br.BitReader, value: R4) R4 {
+    var result = value;
+    if (value.v != 0) {
+        const sign = reader.readBits(1) orelse return value;
+        _ = reader.walkForward(1);
+        if (sign == 1) {
+            result.v *= -1;
+        }
+    }
+    if (value.w != 0) {
+        const sign = reader.readBits(1) orelse return value;
+        _ = reader.walkForward(1);
+        if (sign == 1) {
+            result.w *= -1;
+        }
+    }
+    if (value.x != 0) {
+        const sign = reader.readBits(1) orelse return value;
+        _ = reader.walkForward(1);
+        if (sign == 1) {
+            result.x *= -1;
+        }
+    }
+    if (value.y != 0) {
+        const sign = reader.readBits(1) orelse return value;
+        _ = reader.walkForward(1);
+        if (sign == 1) {
+            result.y *= -1;
+        }
+    }
+    return result;
+}
+
+test "r4 decoding strategy" {
+    const encoded = [_]u8{0b11110000};
+
+    const input = R4{ .v = 1, .w = 1, .x = 1, .y = 1 };
+    const expected = R4{ .v = -1, .w = -1, .x = -1, .y = -1 };
+
+    var reader = br.BitReader.init(encoded[0..]);
+
+    const decoded = r4_decoding_strategy(1, &reader, input);
+
+    try std.testing.expectEqualDeep(expected, decoded);
+}
+
+test "bigval decode" {
+    const encoded = [_]u8{ 0b10010010, 0b00000000 };
+    const expected = [_]BigValue{
+        BigValue{ .x = 0, .y = 0 },
+        BigValue{ .x = 0, .y = 1 },
+        BigValue{ .x = 1, .y = 0 },
+        BigValue{ .x = 1, .y = 1 },
+    };
+
+    var decoded = [_]BigValue{BigValue.default} ** 4;
+
+    try std.testing.expectEqual(4, bigval_huffman_decoder.decode(1, encoded[0..], decoded[0..]));
+    try std.testing.expectEqualSlices(BigValue, expected[0..], decoded[0..]);
+}
+
+test "bigval decode with signs" {
+    const encoded = [_]u8{ 0b10011011, 0b00011000 };
+    const expected = [_]BigValue{
+        BigValue{ .x = 0, .y = 0 },
+        BigValue{ .x = 0, .y = -1 },
+        BigValue{ .x = -1, .y = 0 },
+        BigValue{ .x = -1, .y = -1 },
+    };
+
+    var decoded = [_]BigValue{BigValue.default} ** 4;
+
+    try std.testing.expectEqual(4, bigval_huffman_decoder.decode(1, encoded[0..], decoded[0..]));
+    try std.testing.expectEqualSlices(BigValue, expected[0..], decoded[0..]);
+}
+
+test "bigval decode with linbits" {
+    const encoded = [_]u8{ 0b00101111, 0b00100000, 0b10000011, 0b11111111, 0b11100000 };
+    const expected = [_]BigValue{
+        BigValue{ .x = 8, .y = 14 },
+        BigValue{ .x = 8, .y = 15 + 0x1FFF },
+    };
+
+    var decoded = [_]BigValue{BigValue.default} ** 2;
+
+    try std.testing.expectEqual(LIN_TABLE[31], 13);
+    try std.testing.expectEqual(2, bigval_huffman_decoder.decode(31, encoded[0..], decoded[0..]));
+    try std.testing.expectEqualSlices(BigValue, expected[0..], decoded[0..]);
+}
+
+///    BigCode.init(0b00101111001, 11, BigValue{ .x = 8, .y = 14 }),
+///    BigCode.init(0b00010000, 8, BigValue{ .x = 8, .y = 15 }),
 const R4Code = hm.HuffmanCode(R4);
 const BigCode = hm.HuffmanCode(BigValue);
 
