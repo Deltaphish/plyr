@@ -212,9 +212,7 @@ fn SubTableAlloc(T: anytype) type {
         }
 
         fn get(self: @This(), ix: u32) []Entry(T) {
-            // Index is within bounds
             std.debug.assert(ix < self.subtables.len);
-            // Index does not access unallocated slices
             std.debug.assert(ix < self.subtable_it);
             return &self.subtables[ix];
         }

@@ -102,6 +102,7 @@ const R4 = struct {
 };
 
 const BigValue = struct {
+    // TODO: This is compressed as u4's, the i32 is the final value. Split these definitions up to save space.
     x: i32,
     y: i32,
 
@@ -264,6 +265,10 @@ test "bigval decode with signs" {
 }
 
 test "bigval decode with linbits" {
+    // FROM TABLE 31
+    //    BigCode.init(0b00101111001, 11, BigValue{ .x = 8, .y = 14 }),
+    //    BigCode.init(0b00010000, 8, BigValue{ .x = 8, .y = 15 }),
+
     const encoded = [_]u8{ 0b00101111, 0b00100000, 0b10000011, 0b11111111, 0b11100000 };
     const expected = [_]BigValue{
         BigValue{ .x = 8, .y = 14 },
@@ -276,9 +281,6 @@ test "bigval decode with linbits" {
     try std.testing.expectEqual(2, bigval_huffman_decoder.decode(31, encoded[0..], decoded[0..]));
     try std.testing.expectEqualSlices(BigValue, expected[0..], decoded[0..]);
 }
-
-///    BigCode.init(0b00101111001, 11, BigValue{ .x = 8, .y = 14 }),
-///    BigCode.init(0b00010000, 8, BigValue{ .x = 8, .y = 15 }),
 const R4Code = hm.HuffmanCode(R4);
 const BigCode = hm.HuffmanCode(BigValue);
 
