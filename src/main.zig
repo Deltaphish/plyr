@@ -9,7 +9,11 @@ pub fn main() !void {
     const stdout_file = std.io.getStdOut().writer();
     var bw = std.io.bufferedWriter(stdout_file);
 
-    const files = [_][]const u8{ "./data1.mp3", "./data2.mp3", "./data3.mp3" };
+    const files = [_][]const u8{
+        "./data1.mp3",
+        "./data2.mp3",
+        "./data3.mp3",
+    };
 
     var alloc = std.heap.GeneralPurposeAllocator(.{}){};
 
@@ -31,6 +35,7 @@ pub fn main() !void {
 
         var count: usize = 0;
         while (try decoder.next(alloc.allocator())) |frame| {
+            try bw.writer().print("Version {}\n", .{frame.header.mpeg_version});
             try bw.writer().print("Data size {}\n", .{frame.data.len});
             try bw.writer().print("Sampling rate {}\n", .{frame.header.freq});
             try bw.flush();

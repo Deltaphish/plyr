@@ -13,8 +13,8 @@ test "decode R4 Values" {
     try std.testing.expectEqualSlices(R4, plaintext[0..], dest[0..]);
 }
 
-const r4_huffman_decoder = initalize_r4_decoder();
-const bigval_huffman_decoder = initialize_bigvalue_decoder();
+pub const r4_huffman_decoder = initalize_r4_decoder();
+pub const bigval_huffman_decoder = initialize_bigvalue_decoder();
 
 fn initalize_r4_decoder() hm.HuffmanDecoder(R4, 2) {
     // Needed for comptime to not complain about depth

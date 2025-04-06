@@ -2,6 +2,8 @@ const std = @import("std");
 
 const mp3_t = @import("mp3_types.zig");
 const mp3_unpack = @import("mp3_unpacker.zig");
+const huffman = @import("mp3_table.zig");
+const bt = @import("bit_reader.zig");
 
 pub const LogicalFrame = struct {
     header: mp3_t.MP3_HEADER,
@@ -53,8 +55,9 @@ pub const DecoderState = struct {
             self.data_buffer.writeSlice(self.bitstream[side_info_end..next_frame.next_sync]) catch return mp3_t.MP3_ERROR.OutOfMemory;
             const buffer = alloc.alloc(u8, main_data_size) catch return mp3_t.MP3_ERROR.OutOfMemory;
             self.data_buffer.readFirst(buffer[0..], main_data_size) catch return mp3_t.MP3_ERROR.MalformedSideData;
-
             self.cursor = next_frame.next_sync;
+
+            //         const huffman_values: [575]i32 = huffman_decode(buffer[0..]);
 
             return LogicalFrame{
                 .header = header,
@@ -64,6 +67,84 @@ pub const DecoderState = struct {
         }
         return null;
     }
+
+    fn huffman_decode(side_info: mp3_t.SideInfoMpeg1Stereo, bits: []u8) [4][575]i32 {
+        const result: [2][2][575]i32 = @splat(@splat(@splat(0)));
+
+        var reader = bt.BitReader.init(bits);
+
+        const scalefac_l = [2][2][20]u8;
+        const scalefac_s = [2][2][12][3]u8; // gr,ch,sfb,window
+
+        for (0..2) |gr| {
+            for (0..2) |ch| {
+                const info = side_info.granules[gr][ch];
+                const scalefac_size = scalefac_compress_table[info.scalefac_compress];
+                var table_select: [3]u8 = @splat(0);
+                switch (info.block_info) {
+                    .long_block => |block| {
+                        table_select[0] = block.table_select[0];
+                        table_select[1] = block.table_select[1];
+                        table_select[2] = block.table_select[2];
+                        if (side_info.scfsi[ch][0] == 0 or gr == 0) {
+                            for (0..6) |sfb| {
+                                scalefac_l[gr][ch][sfb] = reader.readBits(scalefac_size.slen1);
+                            }
+                        }
+                        if (side_info.scfsi[ch][1] == 0 or gr == 0) {
+                            for (6..11) |sfb| {
+                                scalefac_l[gr][ch][sfb] = reader.readBits(scalefac_size.slen1);
+                            }
+                        }
+                        if (side_info.scfsi[ch][2] == 0 or gr == 0) {
+                            for (11..16) |sfb| {
+                                scalefac_l[gr][ch][sfb] = reader.readBits(scalefac_size.slen2);
+                            }
+                        }
+                        if (side_info.scfsi[ch][3] == 0 or gr == 0) {
+                            for (16..21) |sfb| {
+                                scalefac_l[gr][ch][sfb] = reader.readBits(scalefac_size.slen2);
+                            }
+                        }
+                    },
+                    .windowed_block => {
+                        @panic("TODO");
+                    },
+                }
+                //Region 0
+                huffman.bigval_huffman_decoder.decode(table_select[0])
+                //Region 1
+                //Region 2
+                //Count1 region
+            }
+        }
+
+        return result;
+    }
+
+    const Scalefac_Size = struct {
+        slen1: u8,
+        slen2: u8,
+    };
+
+    const scalefac_compress_table = [16]Scalefac_Size{
+        Scalefac_Size{ .slen1 = 0, .slen2 = 0 },
+        Scalefac_Size{ .slen1 = 0, .slen2 = 1 },
+        Scalefac_Size{ .slen1 = 0, .slen2 = 2 },
+        Scalefac_Size{ .slen1 = 0, .slen2 = 3 },
+        Scalefac_Size{ .slen1 = 3, .slen2 = 0 },
+        Scalefac_Size{ .slen1 = 1, .slen2 = 1 },
+        Scalefac_Size{ .slen1 = 1, .slen2 = 2 },
+        Scalefac_Size{ .slen1 = 1, .slen2 = 3 },
+        Scalefac_Size{ .slen1 = 2, .slen2 = 1 },
+        Scalefac_Size{ .slen1 = 2, .slen2 = 2 },
+        Scalefac_Size{ .slen1 = 2, .slen2 = 3 },
+        Scalefac_Size{ .slen1 = 3, .slen2 = 1 },
+        Scalefac_Size{ .slen1 = 3, .slen2 = 2 },
+        Scalefac_Size{ .slen1 = 3, .slen2 = 3 },
+        Scalefac_Size{ .slen1 = 4, .slen2 = 2 },
+        Scalefac_Size{ .slen1 = 4, .slen2 = 3 },
+    };
 
     const FrameResult = struct { next_data_begin: usize, next_sync: usize };
 
