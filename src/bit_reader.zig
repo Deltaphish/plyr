@@ -3,9 +3,18 @@ const std = @import("std");
 pub const BitReader = struct {
     buffer: []const u8,
     bit_cursor: u32,
+    bit_cursor_limit: u32,
 
     pub fn init(buffer: []const u8) BitReader {
-        return BitReader{ .buffer = buffer, .bit_cursor = 0 };
+        return BitReader{ .buffer = buffer, .bit_cursor = 0, .bit_cursor_limit = std.math.maxInt(u32) };
+    }
+
+    pub fn init_with_limit(buffer: []const u8, limit: u32) BitReader {
+        return BitReader{ .buffer = buffer, .bit_cursor = 0, .bit_cursor_limit = limit };
+    }
+
+    pub fn inc_limit(self: *BitReader, ammount: u32) void {
+        self.bit_cursor_limit += ammount;
     }
 
     pub fn readByte(self: *BitReader) ?u8 {
@@ -32,8 +41,13 @@ pub const BitReader = struct {
     }
 
     pub fn readBits(self: *BitReader, bit_count: u32) ?u32 {
+        if (bit_count + self.bit_cursor > self.bit_cursor_limit) {
+            return null;
+        }
+        if (bit_count == 0) {
+            return 0;
+        }
         const inital_cursor = self.bit_cursor;
-        std.debug.assert(bit_count != 0);
         defer std.debug.assert(self.bit_cursor == inital_cursor);
 
         if (bit_count < 8) {
@@ -67,6 +81,9 @@ pub const BitReader = struct {
     }
 
     pub fn walkForward(self: *BitReader, steps: u32) bool {
+        if (steps + self.bit_cursor > self.bit_cursor_limit) {
+            return false;
+        }
         self.bit_cursor += steps;
         return self.bit_cursor < self.buffer.len * 8;
     }
@@ -74,7 +91,7 @@ pub const BitReader = struct {
 
 test "read aligned bytes" {
     const buffer = [_]u8{ 0xff, 0 };
-    var breader = BitReader{ .buffer = buffer[0..], .bit_cursor = 0 };
+    var breader = BitReader.init(buffer[0..]);
 
     try std.testing.expect(breader.readByte() != null);
     try std.testing.expectEqual(buffer[0], breader.readByte());
@@ -87,7 +104,7 @@ test "read aligned bytes" {
 
 test "read N < 8 bits" {
     const buffer = [_]u8{ 0, 0b11111111 };
-    var breader = BitReader{ .buffer = buffer[0..], .bit_cursor = 0 };
+    var breader = BitReader.init(buffer[0..]);
 
     try std.testing.expect(breader.readBits(2) != null);
     try std.testing.expectEqual(0, breader.readBits(2));
@@ -100,7 +117,7 @@ test "read N < 8 bits" {
 
 test "read N > 8 bits" {
     const buffer = [_]u8{ 0, 0b11111111 };
-    var breader = BitReader{ .buffer = buffer[0..], .bit_cursor = 0 };
+    var breader = BitReader.init(buffer[0..]);
 
     try std.testing.expect(breader.readBits(16) != null);
     try std.testing.expectEqual(0b11111111, breader.readBits(16));
@@ -108,7 +125,7 @@ test "read N > 8 bits" {
 
 test "read N > 8 where N % 8 != 0 bits" {
     const buffer = [_]u8{ 0b11111111, 0xff };
-    var breader = BitReader{ .buffer = buffer[0..], .bit_cursor = 0 };
+    var breader = BitReader.init(buffer[0..]);
 
     try std.testing.expect(breader.readBits(13) != null);
     try std.testing.expectEqual(0x1FFF, breader.readBits(13));
@@ -116,7 +133,7 @@ test "read N > 8 where N % 8 != 0 bits" {
 
 test "read some bits" {
     const buffer = [_]u8{ 0, 0b11111111 };
-    var breader = BitReader{ .buffer = buffer[0..], .bit_cursor = 0 };
+    var breader = BitReader.init(buffer[0..]);
 
     try std.testing.expect(breader.readByte() != null);
     try std.testing.expectEqual(0, breader.readByte());
@@ -134,7 +151,15 @@ test "read some bits" {
 
 test "detect end of stream" {
     const buffer = [_]u8{ 0, 0b11111111 };
-    var breader = BitReader{ .buffer = buffer[0..], .bit_cursor = 0 };
+    var breader = BitReader.init(buffer[0..]);
+
+    try std.testing.expect(breader.walkForward(8));
+    try std.testing.expect(!breader.walkForward(8));
+}
+
+test "detect bit limit" {
+    const buffer = [_]u8{ 0, 0b11111111, 0b1111 };
+    var breader = BitReader.init_with_limit(buffer[0..], 9);
 
     try std.testing.expect(breader.walkForward(8));
     try std.testing.expect(!breader.walkForward(8));

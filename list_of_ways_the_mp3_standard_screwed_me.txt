@@ -1,0 +1,9 @@
+1. Huffman table 0 has no rows
+2. Finding slen1,2,3,4 for mpgeg 2 & 2.5 requires more logic than the lunar lander.
+3. the number of big value pairs in the huffman encoded data is "big_value" while the number of small value pairs is "count1"
+4. The header does not contain the size of main_data, the size of main_data for the current frame can be found by finding the next frame and use its main_data_begin to see where yours ends.
+5. try to guess what "part2_3_length" means.
+6. There are around 20 huffman tables (the last ones have around 256 entries) that need to be imported into the decoder, the only source I found was a pdf with missformated tables.
+7. MP3 files are generaly surrounded by and ID3 file, can be skipped as they *should* be syncword free.
+8. Mp3 v1 and v2(.5) are very diffrent (atleast on the decoding side).
+9. The first frame may be an "Info" frame added by LAME, which has no audio data.

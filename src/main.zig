@@ -11,8 +11,6 @@ pub fn main() !void {
 
     const files = [_][]const u8{
         "./data1.mp3",
-        "./data2.mp3",
-        "./data3.mp3",
     };
 
     var alloc = std.heap.GeneralPurposeAllocator(.{}){};
@@ -31,15 +29,15 @@ pub fn main() !void {
 
         const mp3_data = buffer[(tag.header.size + 10)..];
 
-        var decoder = try mp3_decode.DecoderState.init(mp3_data, alloc.allocator());
+        var decoder = try mp3_decode.DecoderState.init(mp3_data);
 
         var count: usize = 0;
-        while (try decoder.next(alloc.allocator())) |frame| {
+        while (try decoder.next()) |frame| {
             try bw.writer().print("Version {}\n", .{frame.header.mpeg_version});
-            try bw.writer().print("Data size {}\n", .{frame.data.len});
             try bw.writer().print("Sampling rate {}\n", .{frame.header.freq});
+            try bw.writer().print("first freq data {}\n", .{frame.data[0][0].data[0]});
+
             try bw.flush();
-            alloc.allocator().free(frame.data);
             count += 1;
         }
         try bw.writer().print("Found {} frames\n", .{count});

@@ -62,8 +62,7 @@ pub fn HuffmanDecoder(comptime T: type, comptime N_SUBTABLE: comptime_int) type 
             return table[byte];
         }
 
-        pub fn decode(self: @This(), table_id: u32, bytes: []const u8, dest: []T) u32 {
-            var reader = bit_reader.BitReader.init(bytes);
+        pub fn decode(self: @This(), table_id: u32, reader: *bit_reader.BitReader, dest: []T) u32 {
             var dest_it: u32 = 0;
 
             while (reader.readByte()) |byte| {
@@ -80,22 +79,24 @@ pub fn HuffmanDecoder(comptime T: type, comptime N_SUBTABLE: comptime_int) type 
 
                 var val = entry.val;
 
-                if (!reader.walkForward(val.len) or dest_it >= dest.len) {
+                if (!reader.walkForward(val.len)) {
                     return dest_it;
                 }
 
                 val.len += actual_length;
 
-                std.debug.print("\nExpected {} got {}\n", .{ reader.bit_cursor, start + val.len });
                 std.debug.assert(reader.bit_cursor == start + val.len);
 
                 if (self.strategy != null) {
-                    dest[dest_it] = self.strategy.?(table_id, &reader, val.val);
+                    dest[dest_it] = self.strategy.?(table_id, reader, val.val);
                 } else {
                     dest[dest_it] = val.val;
                 }
 
                 dest_it += 1;
+                if (dest_it >= dest.len) {
+                    return dest_it;
+                }
             }
 
             return dest_it;
@@ -113,13 +114,14 @@ test "Decode u32s" {
     };
 
     const table = HuffmanTable(u32).init(0, rows[0..]);
+    var decoder = HuffmanDecoder(u32, 200).init(&[_]HuffmanTable(u32){table});
 
     const plaintext = [_]u32{ 1, 2, 3, 3, 2, 1, 4 };
     const bitstream = [_]u8{ 0b10010101, 0b00110000, 0b00000000 };
-
-    var decoder = HuffmanDecoder(u32, 200).init(&[_]HuffmanTable(u32){table});
     var dest = [_]u32{0} ** 7;
-    try std.testing.expectEqual(7, decoder.decode(0, bitstream[0..], dest[0..]));
+
+    var reader = bit_reader.BitReader.init(bitstream[0..]);
+    try std.testing.expectEqual(7, decoder.decode(0, &reader, dest[0..]));
     try std.testing.expectEqualSlices(u32, plaintext[0..], dest[0..]);
 }
 
@@ -148,7 +150,8 @@ test "Decode u32s with strategy" {
 
     var decoder = HuffmanDecoder(u32, 200).init_with_strategy(dummy_strat, &[_]HuffmanTable(u32){table});
     var dest = [_]u32{0} ** 7;
-    try std.testing.expectEqual(7, decoder.decode(0, bitstream[0..], dest[0..]));
+    var reader = bit_reader.BitReader.init(bitstream[0..]);
+    try std.testing.expectEqual(7, decoder.decode(0, &reader, dest[0..]));
     try std.testing.expectEqualSlices(u32, plaintext[0..], dest[0..]);
 }
 

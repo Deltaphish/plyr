@@ -18,6 +18,7 @@ pub const MP3_ERROR = error{
     OutOfMemory,
     MalformedSideData,
     NoSyncWordsFound,
+    MalformedData,
 };
 
 pub const MP3_HEADER = struct {
@@ -126,4 +127,15 @@ pub const MPEG_VERSION = enum {
     MPEG_25,
     MPEG_2,
     MPEG_1,
+};
+
+pub const DecompressedData = struct {
+    scalefac_l: [21]u8,
+    scalefac_s: [13][3]u8,
+    data: [576]i32,
+    pub const default: DecompressedData = DecompressedData{
+        .scalefac_l = @splat(0),
+        .scalefac_s = @splat(@splat(0)),
+        .data = @splat(0),
+    };
 };

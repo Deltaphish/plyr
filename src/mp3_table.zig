@@ -5,16 +5,48 @@ const br = @import("bit_reader.zig");
 test "decode R4 Values" {
     // Encode
     const buffer = [_]u8{ 0b10101000, 0 };
+    var reader = br.BitReader.init(buffer[0..]);
     const plaintext = [_]R4{ TABLE_A[0].getValue().?.val, TABLE_A[1].getValue().?.val, TABLE_A[11].getValue().?.val };
 
     var dest = [_]R4{R4.default} ** 3;
 
-    try std.testing.expectEqual(3, r4_huffman_decoder.decode(0, buffer[0..], dest[0..]));
+    try std.testing.expectEqual(3, r4_huffman_decoder.decode(0, &reader, dest[0..]));
     try std.testing.expectEqualSlices(R4, plaintext[0..], dest[0..]);
 }
 
-pub const r4_huffman_decoder = initalize_r4_decoder();
-pub const bigval_huffman_decoder = initialize_bigvalue_decoder();
+pub fn huffman_decode(reader: *br.BitReader, table_select: [3]u8, big_value_count: u16, out: []i32) u32 {
+    var big_values = [_]BigValue{BigValue.default} ** 288;
+    var actual_big_value_count: u32 = undefined;
+    if (table_select[0] != 0) {
+        actual_big_value_count = bigval_huffman_decoder.decode(table_select[0], reader, big_values[0..big_value_count]);
+    } else {
+        actual_big_value_count = 0;
+    }
+
+    std.debug.assert(actual_big_value_count == big_value_count);
+
+    var small_values = [_]R4{R4.default} ** 144;
+    const small_values_count = r4_huffman_decoder.decode(table_select[1], reader, small_values[0..]);
+
+    var i: u32 = 0;
+    for (0..big_value_count) |bi| {
+        out[i] = big_values[bi].x;
+        out[i + 1] = big_values[bi].y;
+        i += 2;
+    }
+
+    for (0..small_values_count) |si| {
+        out[i] = small_values[si].x;
+        out[i + 1] = small_values[si].y;
+        out[i + 2] = small_values[si].v;
+        out[i + 3] = small_values[si].w;
+        i += 4;
+    }
+    return small_values_count + big_value_count;
+}
+
+const r4_huffman_decoder = initalize_r4_decoder();
+const bigval_huffman_decoder = initialize_bigvalue_decoder();
 
 fn initalize_r4_decoder() hm.HuffmanDecoder(R4, 2) {
     // Needed for comptime to not complain about depth
@@ -161,7 +193,6 @@ fn bigval_decoding_strategy(table_id: u32, reader: *br.BitReader, value: BigValu
     }
     if (lin != 0 and value.y == 15) {
         const extra: i31 = @intCast(reader.readBits(lin) orelse return value);
-        std.debug.print("\nFOOF {}\n", .{extra});
         result.y += extra;
         _ = reader.walkForward(lin);
     }
@@ -236,6 +267,8 @@ test "r4 decoding strategy" {
 
 test "bigval decode" {
     const encoded = [_]u8{ 0b10010010, 0b00000000 };
+    var reader = br.BitReader.init(encoded[0..]);
+
     const expected = [_]BigValue{
         BigValue{ .x = 0, .y = 0 },
         BigValue{ .x = 0, .y = 1 },
@@ -245,12 +278,14 @@ test "bigval decode" {
 
     var decoded = [_]BigValue{BigValue.default} ** 4;
 
-    try std.testing.expectEqual(4, bigval_huffman_decoder.decode(1, encoded[0..], decoded[0..]));
+    try std.testing.expectEqual(4, bigval_huffman_decoder.decode(1, &reader, decoded[0..]));
     try std.testing.expectEqualSlices(BigValue, expected[0..], decoded[0..]);
 }
 
 test "bigval decode with signs" {
     const encoded = [_]u8{ 0b10011011, 0b00011000 };
+    var reader = br.BitReader.init(encoded[0..]);
+
     const expected = [_]BigValue{
         BigValue{ .x = 0, .y = 0 },
         BigValue{ .x = 0, .y = -1 },
@@ -260,7 +295,7 @@ test "bigval decode with signs" {
 
     var decoded = [_]BigValue{BigValue.default} ** 4;
 
-    try std.testing.expectEqual(4, bigval_huffman_decoder.decode(1, encoded[0..], decoded[0..]));
+    try std.testing.expectEqual(4, bigval_huffman_decoder.decode(1, &reader, decoded[0..]));
     try std.testing.expectEqualSlices(BigValue, expected[0..], decoded[0..]);
 }
 
@@ -270,6 +305,8 @@ test "bigval decode with linbits" {
     //    BigCode.init(0b00010000, 8, BigValue{ .x = 8, .y = 15 }),
 
     const encoded = [_]u8{ 0b00101111, 0b00100000, 0b10000011, 0b11111111, 0b11100000 };
+    var reader = br.BitReader.init(encoded[0..]);
+
     const expected = [_]BigValue{
         BigValue{ .x = 8, .y = 14 },
         BigValue{ .x = 8, .y = 15 + 0x1FFF },
@@ -278,7 +315,7 @@ test "bigval decode with linbits" {
     var decoded = [_]BigValue{BigValue.default} ** 2;
 
     try std.testing.expectEqual(LIN_TABLE[31], 13);
-    try std.testing.expectEqual(2, bigval_huffman_decoder.decode(31, encoded[0..], decoded[0..]));
+    try std.testing.expectEqual(2, bigval_huffman_decoder.decode(31, &reader, decoded[0..]));
     try std.testing.expectEqualSlices(BigValue, expected[0..], decoded[0..]);
 }
 const R4Code = hm.HuffmanCode(R4);
