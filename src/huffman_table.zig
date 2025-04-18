@@ -44,11 +44,13 @@ pub fn HuffmanDecoder(comptime T: type, comptime N_SUBTABLE: comptime_int) type 
         }
 
         pub fn alias_table(self: *@This(), from: u32, to: u32) void {
+            // No unintialized tables
             std.debug.assert(self.table_ix[to] != std.math.maxInt(u32));
             self.table_ix[from] = self.table_ix[to];
         }
 
         fn beginQuery(self: @This(), table_id: u32, byte: u8) Entry(T) {
+            // No unintialized tables
             std.debug.assert(self.table_ix[table_id] != std.math.maxInt(u32));
             return self.query(self.table_ix[table_id], byte);
         }
@@ -65,13 +67,25 @@ pub fn HuffmanDecoder(comptime T: type, comptime N_SUBTABLE: comptime_int) type 
         pub fn decode(self: @This(), table_id: u32, reader: *bit_reader.BitReader, dest: []T) u32 {
             var dest_it: u32 = 0;
 
+            // Hard code Table 0
+            if (table_id == 0) {
+                return 0;
+            }
+
+            if (dest.len == 0) {
+                //Nothing to do here...
+                return 0;
+            }
+
             while (reader.readByte()) |byte| {
                 const start = reader.bit_cursor;
                 var entry: Entry(T) = self.beginQuery(table_id, byte);
                 var actual_length: u5 = 0;
                 while (entry == .link) {
                     actual_length += 8;
-                    _ = reader.walkForward(8);
+                    if (!reader.walkForward(8)) {
+                        return dest_it;
+                    }
                     const b = reader.readByte() orelse return dest_it;
                     entry = self.queryLink(entry, b);
                 }
@@ -85,6 +99,9 @@ pub fn HuffmanDecoder(comptime T: type, comptime N_SUBTABLE: comptime_int) type 
 
                 val.len += actual_length;
 
+                if (reader.bit_cursor != start + val.len) {
+                    std.debug.print("{} {} {}\n", .{ reader.bit_cursor, start, val.len });
+                }
                 std.debug.assert(reader.bit_cursor == start + val.len);
 
                 if (self.strategy != null) {
@@ -267,7 +284,7 @@ fn populateSubtable(comptime T: type, alloc: *SubTableAlloc(T), nodes: []const H
     const inital_stack = Frame(T){ .items = inital_ba, .subtable_addr = addr };
     stack.append(inital_stack) catch @panic("Waka waka");
 
-    while (stack.popOrNull()) |frame| {
+    while (stack.pop()) |frame| {
         innerPopulateSubtable(T, alloc, frame.subtable_addr, frame.items.buffer[0..frame.items.len], &stack);
     }
     return addr;

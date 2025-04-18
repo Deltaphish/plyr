@@ -15,7 +15,7 @@ pub const MP3_ERROR = error{
     UnsupportedSamplingRate,
     InvalidBitrate,
     InvalidMPEGVersion,
-    OutOfMemory,
+    MP3OutOfMemory,
     MalformedSideData,
     NoSyncWordsFound,
     MalformedData,

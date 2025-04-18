@@ -118,7 +118,7 @@ pub fn MP3_parse_frames(data: []const u8, alloc: std.mem.Allocator) mp3_t.MP3_ER
 
         const mp3_data = try unpack_side_info(header, frame_data);
 
-        const new_frame = frames.addOne() catch return mp3_t.MP3_ERROR.OutOfMemory;
+        const new_frame = frames.addOne() catch return mp3_t.MP3_ERROR.MP3OutOfMemory;
         new_frame.* = mp3_t.MP3_FRAME{ .header = header, .sideInfo = mp3_data };
         remainingBuffer = remainingBuffer[header.frame_size()..];
     }

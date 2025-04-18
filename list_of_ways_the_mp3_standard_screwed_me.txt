@@ -7,3 +7,7 @@
 7. MP3 files are generaly surrounded by and ID3 file, can be skipped as they *should* be syncword free.
 8. Mp3 v1 and v2(.5) are very diffrent (atleast on the decoding side).
 9. The first frame may be an "Info" frame added by LAME, which has no audio data.
+10. The huffman encoded data is split into the big_values part, count1 part, and the zeros part,
+    but the big_values part is split into three more regions (region 0,1,2) each of which can use different huffman tables.
+11. Said regions are partiotioned by region0_count and region1_count. Count referers to the count of scalefactor bands, not count of BigValues/small values.
+12. And how large are those scalefacto bands? Consult one of the 19 extra tables, as it's dependent on sampling frequency and block type.

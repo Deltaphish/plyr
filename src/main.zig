@@ -4,13 +4,14 @@ const config = @import("config");
 const id3 = @import("id3.zig");
 const mp3_unpack = @import("mp3_unpacker.zig");
 const mp3_decode = @import("mp3_decoder.zig");
+const mp3_t = @import("mp3_types.zig");
 
 pub fn main() !void {
     const stdout_file = std.io.getStdOut().writer();
     var bw = std.io.bufferedWriter(stdout_file);
 
     const files = [_][]const u8{
-        "./data1.mp3",
+        "./data2.mp3",
     };
 
     var alloc = std.heap.GeneralPurposeAllocator(.{}){};
@@ -32,15 +33,38 @@ pub fn main() !void {
         var decoder = try mp3_decode.DecoderState.init(mp3_data);
 
         var count: usize = 0;
-        while (try decoder.next()) |frame| {
-            try bw.writer().print("Version {}\n", .{frame.header.mpeg_version});
-            try bw.writer().print("Sampling rate {}\n", .{frame.header.freq});
-            try bw.writer().print("first freq data {}\n", .{frame.data[0][0].data[0]});
+        var bad_frames: usize = 0;
+        while (true) {
+            if (decoder.next()) |frame| {
+                if (frame == null) {
+                    // end of input
+                    break;
+                }
+                try bw.writer().print("Version {}\n", .{frame.?.header.mpeg_version});
+                try bw.writer().print("Sampling rate {}\n", .{frame.?.header.freq});
+                try bw.writer().print("big_count {}\n", .{frame.?.side_info.granules[0][1].big_values});
+                try bw.writer().print("Data {any}\n", .{frame.?.data[0][1].scalefac_s});
 
-            try bw.flush();
-            count += 1;
+                try bw.flush();
+                count += 1;
+            } else |err| switch (err) {
+                mp3_t.MP3_ERROR.MalformedData => {
+                    try bw.writer().print("Found bad frame (main)\n", .{});
+                    bad_frames += 1;
+                    continue;
+                },
+                mp3_t.MP3_ERROR.MalformedSideData => {
+                    try bw.writer().print("Found bad frame (side)\n", .{});
+                    bad_frames += 1;
+                    continue;
+                },
+                else => {
+                    std.debug.print("Error occured {}\n", .{err});
+                    break;
+                },
+            }
         }
-        try bw.writer().print("Found {} frames\n", .{count});
+        try bw.writer().print("Found {} frames, skipped {} frames\n", .{ count, bad_frames });
     }
     try bw.flush();
 }

@@ -42,6 +42,7 @@ pub const BitReader = struct {
 
     pub fn readBits(self: *BitReader, bit_count: u32) ?u32 {
         if (bit_count + self.bit_cursor > self.bit_cursor_limit) {
+            std.debug.print("Hitt cursor limit {}, with step {}\n", .{ self.bit_cursor_limit, bit_count });
             return null;
         }
         if (bit_count == 0) {

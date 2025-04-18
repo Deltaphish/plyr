@@ -14,19 +14,21 @@ test "decode R4 Values" {
     try std.testing.expectEqualSlices(R4, plaintext[0..], dest[0..]);
 }
 
-pub fn huffman_decode(reader: *br.BitReader, table_select: [3]u8, big_value_count: u16, out: []i32) u32 {
+pub fn huffman_decode(reader: *br.BitReader, table_select: [3]u8, count_one_table_select: bool, big_value_count: u16, regionSize: [2]u32, out: []i32) u32 {
     var big_values = [_]BigValue{BigValue.default} ** 288;
     var actual_big_value_count: u32 = undefined;
-    if (table_select[0] != 0) {
-        actual_big_value_count = bigval_huffman_decoder.decode(table_select[0], reader, big_values[0..big_value_count]);
-    } else {
-        actual_big_value_count = 0;
-    }
-
-    std.debug.assert(actual_big_value_count == big_value_count);
+    const region0_offset = @min(regionSize[0] + regionSize[1], big_value_count);
+    // Region 0
+    actual_big_value_count = bigval_huffman_decoder.decode(table_select[0], reader, big_values[0..regionSize[0]]);
+    //Region 1
+    actual_big_value_count += bigval_huffman_decoder.decode(table_select[1], reader, big_values[regionSize[0]..region0_offset]);
+    //Region 2
+    actual_big_value_count += bigval_huffman_decoder.decode(table_select[2], reader, big_values[region0_offset..big_value_count]);
 
     var small_values = [_]R4{R4.default} ** 144;
-    const small_values_count = r4_huffman_decoder.decode(table_select[1], reader, small_values[0..]);
+    const small_values_limit = (576 - big_value_count * 2) / 4;
+    // Plus one to table select, as table_id: 0 is reserved for TABLE_0 where all elements are zero.
+    const small_values_count = r4_huffman_decoder.decode(@as(u8, @intFromBool(count_one_table_select)) + 1, reader, small_values[0..small_values_limit]);
 
     var i: u32 = 0;
     for (0..big_value_count) |bi| {
@@ -54,8 +56,8 @@ fn initalize_r4_decoder() hm.HuffmanDecoder(R4, 2) {
     const decoder = hm.HuffmanDecoder(R4, 2).init_with_strategy(
         r4_decoding_strategy,
         &[_]hm.HuffmanTable(R4){
-            hm.HuffmanTable(R4){ .rows = TABLE_A[0..], .id = 0 },
-            hm.HuffmanTable(R4){ .rows = TABLE_B[0..], .id = 1 },
+            hm.HuffmanTable(R4){ .rows = TABLE_A[0..], .id = 1 },
+            hm.HuffmanTable(R4){ .rows = TABLE_B[0..], .id = 2 },
         },
     );
     return decoder;
