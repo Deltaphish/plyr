@@ -6,12 +6,6 @@ const huffman = @import("mp3_table.zig");
 const bt = @import("bit_reader.zig");
 const bands = @import("scalefactor_table.zig");
 
-pub const LogicalFrame = struct {
-    header: mp3_t.MP3_HEADER,
-    side_info: mp3_t.SideInfoMpeg1Stereo,
-    data: [2][2]mp3_t.DecompressedData,
-};
-
 pub const DecoderState = struct {
     bitstream: []const u8,
     cursor: usize,
@@ -38,7 +32,7 @@ pub const DecoderState = struct {
         }
     }
 
-    pub fn next(self: *DecoderState) mp3_t.MP3_ERROR!?LogicalFrame {
+    pub fn next(self: *DecoderState) mp3_t.MP3_ERROR!?mp3_t.LogicalFrame {
         if (self.cursor > self.bitstream.len - 2) {
             return null;
         }
@@ -77,7 +71,7 @@ pub const DecoderState = struct {
             switch (side_info) {
                 .mpeg1_stereo => |info| {
                     if (huffman_decode(header, info, buffer[0..])) |data| {
-                        return LogicalFrame{
+                        return mp3_t.LogicalFrame{
                             .header = header,
                             .side_info = info,
                             .data = data,

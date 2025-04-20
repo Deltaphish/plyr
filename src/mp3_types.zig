@@ -5,8 +5,14 @@ pub const MP3_FRAME = struct {
 
 pub const LogicalFrame = struct {
     header: MP3_HEADER,
-    sideInfo: MP3_SIDE_INFO,
-    data: []u8,
+    side_info: SideInfoMpeg1Stereo,
+    data: [2][2]DecompressedData,
+};
+
+pub const RequantizedFrame = struct {
+    header: MP3_HEADER,
+    side_info: SideInfoMpeg1Stereo,
+    data: [2][2][576]f32,
 };
 
 pub const MP3_ERROR = error{

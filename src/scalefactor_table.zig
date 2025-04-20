@@ -21,6 +21,24 @@ const ScalefactorTable = struct {
         return self;
     }
 
+    pub fn getBandByPosition(self: ScalefactorTable, is_long: bool, freq: u32, pos: u32) u32 {
+        if (is_long) {
+            for (self.long_table[hash(freq)]) |row| {
+                if (pos <= row.end) {
+                    return row.band;
+                }
+            }
+            unreachable;
+        } else {
+            for (self.short_table[hash(freq)]) |row| {
+                if (pos <= row.end) {
+                    return row.band;
+                }
+            }
+        }
+        return 0;
+    }
+
     pub fn getBandSize(self: ScalefactorTable, freq: u32, is_long: bool, subband_count: u8) u32 {
         if (subband_count == 0) {
             return 0;
