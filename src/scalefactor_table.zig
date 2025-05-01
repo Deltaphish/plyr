@@ -21,6 +21,17 @@ const ScalefactorTable = struct {
         return self;
     }
 
+    pub fn getBandAndWindowByPosition(self: ScalefactorTable, freq: u32, pos: u32) struct { u2, u16 } {
+        for (self.short_table[hash(freq)]) |row| {
+            if (pos <= row.end * 3) {
+                const window: u2 = @intCast((pos - row.start) % 3); //TODO: The math may not check out on this
+                return .{ window, row.band };
+            }
+        }
+
+        return .{ 0, 0 };
+    }
+
     pub fn getBandByPosition(self: ScalefactorTable, is_long: bool, freq: u32, pos: u32) u32 {
         if (is_long) {
             for (self.long_table[hash(freq)]) |row| {
@@ -28,7 +39,6 @@ const ScalefactorTable = struct {
                     return row.band;
                 }
             }
-            unreachable;
         } else {
             for (self.short_table[hash(freq)]) |row| {
                 if (pos <= row.end) {

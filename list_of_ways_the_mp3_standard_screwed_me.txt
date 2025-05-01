@@ -11,3 +11,5 @@
     but the big_values part is split into three more regions (region 0,1,2) each of which can use different huffman tables.
 11. Said regions are partiotioned by region0_count and region1_count. Count referers to the count of scalefactor bands, not count of BigValues/small values.
 12. And how large are those scalefacto bands? Consult one of the 19 extra tables, as it's dependent on sampling frequency and block type.
+13: "For long-blocks the forumla is:" followed by blank space
+14: When quantaizing mixed blocks the inital long block uses scalefactor bands 0-7 and short blocks 3-12. These are not overlapping bands as the blocks use different tables.

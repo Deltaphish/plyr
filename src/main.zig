@@ -6,12 +6,14 @@ const mp3_unpack = @import("mp3_unpacker.zig");
 const mp3_decode = @import("mp3_decoder.zig");
 const mp3_t = @import("mp3_types.zig");
 
+const mp3_requant = @import("requantize.zig");
+
 pub fn main() !void {
     const stdout_file = std.io.getStdOut().writer();
     var bw = std.io.bufferedWriter(stdout_file);
 
     const files = [_][]const u8{
-        "./data2.mp3",
+        "./data1.mp3",
     };
 
     var alloc = std.heap.GeneralPurposeAllocator(.{}){};
@@ -35,18 +37,22 @@ pub fn main() !void {
         var count: usize = 0;
         var bad_frames: usize = 0;
         while (true) {
-            if (decoder.next()) |frame| {
-                if (frame == null) {
-                    // end of input
-                    break;
-                }
-                try bw.writer().print("Version {}\n", .{frame.?.header.mpeg_version});
-                try bw.writer().print("Sampling rate {}\n", .{frame.?.header.freq});
-                try bw.writer().print("big_count {}\n", .{frame.?.side_info.granules[0][1].big_values});
-                try bw.writer().print("Data {any}\n", .{frame.?.data[0][1].scalefac_s});
+            if (decoder.next()) |maybeFrame| {
+                if (maybeFrame) |frame| {
+                    try bw.writer().print("Version {}\n", .{frame.header.mpeg_version});
+                    try bw.writer().print("Sampling rate {}\n", .{frame.header.freq});
+                    try bw.writer().print("big_count {}\n", .{frame.side_info.granules[0][1].big_values});
+                    try bw.writer().print("Data {any}\n", .{frame.data[1][0].data});
 
-                try bw.flush();
-                count += 1;
+                    const q_frame = mp3_requant.requantize(frame);
+
+                    try bw.writer().print("Quantized data: {any}\n", .{q_frame.data[0][1]});
+
+                    try bw.flush();
+                    count += 1;
+                } else {
+                    break; // End of file
+                }
             } else |err| switch (err) {
                 mp3_t.MP3_ERROR.MalformedData => {
                     try bw.writer().print("Found bad frame (main)\n", .{});
