@@ -7,6 +7,9 @@ const mp3_decode = @import("mp3_decoder.zig");
 const mp3_t = @import("mp3_types.zig");
 
 const mp3_requant = @import("requantize.zig");
+const mp3_alias = @import("alias_reduction.zig");
+
+const mp3_imdct = @import("./imdct.zig");
 
 pub fn main() !void {
     const stdout_file = std.io.getStdOut().writer();
@@ -44,7 +47,9 @@ pub fn main() !void {
                     try bw.writer().print("big_count {}\n", .{frame.side_info.granules[0][1].big_values});
                     try bw.writer().print("Data {any}\n", .{frame.data[1][0].data});
 
-                    const q_frame = mp3_requant.requantize(frame);
+                    var q_frame = mp3_requant.requantize(frame);
+                    mp3_alias.alias_reduction(&q_frame);
+                    var samples = mp3_imdct.convertToSamples(null, q_frame);
 
                     try bw.writer().print("Quantized data: {any}\n", .{q_frame.data[0][1]});
 

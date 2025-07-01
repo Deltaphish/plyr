@@ -74,9 +74,10 @@ pub fn requantize(frame: mp3_t.LogicalFrame) mp3_t.RequantizedFrame {
                                     const is: f32 = @floatFromInt(decodedData.data[i]);
                                     const a = alpha(info.global_gain, block.subblock_gain[window]);
                                     const b = beta(@intFromBool(info.scalefac_scale), decodedData.scalefac_s[sb][window]);
-                                    result.data[gr][ch][i] = std.math.sign(is) * std.math.pow(f32, @abs(is), 4.0 / 3.0);
-                                    result.data[gr][ch][i] *= std.math.pow(f32, 2.0, a);
-                                    result.data[gr][ch][i] *= std.math.pow(f32, 2.0, b);
+                                    const sortedPosition: u32 = @as(u32, window) * 192 + i / 3; // Sort short block while we are at it.
+                                    result.data[gr][ch][sortedPosition] = std.math.sign(is) * std.math.pow(f32, @abs(is), 4.0 / 3.0);
+                                    result.data[gr][ch][sortedPosition] *= std.math.pow(f32, 2.0, a);
+                                    result.data[gr][ch][sortedPosition] *= std.math.pow(f32, 2.0, b);
                                 }
                             },
                             0 => {
@@ -90,9 +91,10 @@ pub fn requantize(frame: mp3_t.LogicalFrame) mp3_t.RequantizedFrame {
                             const is: f32 = @floatFromInt(decodedData.data[i]);
                             const a = alpha(info.global_gain, block.subblock_gain[window]);
                             const b = beta(@intFromBool(info.scalefac_scale), decodedData.scalefac_s[sb][window]);
-                            result.data[gr][ch][i] = std.math.sign(is) * std.math.pow(f32, @abs(is), 4.0 / 3.0);
-                            result.data[gr][ch][i] *= std.math.pow(f32, 2.0, a);
-                            result.data[gr][ch][i] *= std.math.pow(f32, 2.0, b);
+                            const sortedPosition: u32 = @as(u32, window) * 192 + i / 3; // Sort short block while we are at it.
+                            result.data[gr][ch][sortedPosition] = std.math.sign(is) * std.math.pow(f32, @abs(is), 4.0 / 3.0);
+                            result.data[gr][ch][sortedPosition] *= std.math.pow(f32, 2.0, a);
+                            result.data[gr][ch][sortedPosition] *= std.math.pow(f32, 2.0, b);
                         }
                     }
                 },
