@@ -43,6 +43,7 @@ pub fn convertToSamples(maybePreviousRest: ?[2][32][18]f32, frame: mp3_t.Requant
         }
     }
 
+    //TODO: refactor out to caller?
     if (maybePreviousRest) |previous| {
         for (0..2) |ch| {
             for (0..32) |subband| {

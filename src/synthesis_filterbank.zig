@@ -1,12 +1,14 @@
 const std = @import("std");
 const d_vector: DVector = @import("./d_vector.zon");
 
+const ringBuffer = @import("./ring.zig");
+
 const DVector = struct {
     vector: [512]f32,
 };
 
 const Filterbank = struct {
-    v: std.fifo.LinearFifo([64]f32, std.fifo.LinearFifoBufferType{ .Static = @sizeOf([64]f32) * 32 }),
+    v: ringBuffer.RingBuffer([32]f32, 32),
 
     fn getU(self: *const Filterbank) [512]f32 {
         var buffer: [16][64]f32 = @splat(@splat(0.0));

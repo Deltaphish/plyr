@@ -49,9 +49,9 @@ pub fn main() !void {
 
                     var q_frame = mp3_requant.requantize(frame);
                     mp3_alias.alias_reduction(&q_frame);
-                    var samples = mp3_imdct.convertToSamples(null, q_frame);
+                    const samples = mp3_imdct.convertToSamples(null, q_frame);
 
-                    try bw.writer().print("Quantized data: {any}\n", .{q_frame.data[0][1]});
+                    try bw.writer().print("Quantized data: {any}\n", .{samples[0][1]});
 
                     try bw.flush();
                     count += 1;
