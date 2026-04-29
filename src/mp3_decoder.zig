@@ -5,28 +5,28 @@ const mp3_unpack = @import("mp3_unpacker.zig");
 const huffman = @import("mp3_table.zig");
 const bt = @import("bit_reader.zig");
 const bands = @import("scalefactor_table.zig");
+const ring = @import("ring.zig");
 
 pub const DecoderState = struct {
     bitstream: []const u8,
     cursor: usize,
     expected_version: ?mp3_t.MPEG_VERSION,
-    internal_alloc: std.heap.FixedBufferAllocator,
-    buffer: [2000]u8,
-    data_buffer: std.RingBuffer,
+    main_data_buffer: [2000]u8,
+    main_data_fifo: std.Io.Writer,
+    huffman_table: huffman.Decoder,
 
-    pub fn init(data: []const u8) mp3_t.MP3_ERROR!DecoderState {
+    pub fn init(decoder_table: huffman.Decoder, data: []const u8) mp3_t.MP3_ERROR!DecoderState {
         if (find_sync_word(data, 0)) |offset| {
-            var buffer: [2000]u8 = @splat(0);
-            var fba = std.heap.FixedBufferAllocator.init(buffer[0..]);
-            const ring_buff = std.RingBuffer.init(fba.allocator(), 2000) catch return mp3_t.MP3_ERROR.MP3OutOfMemory;
-            return DecoderState{
+            var decoder = DecoderState{
                 .bitstream = data,
                 .cursor = offset,
-                .buffer = buffer,
-                .internal_alloc = fba,
-                .data_buffer = ring_buff,
+                .main_data_buffer = undefined,
+                .main_data_fifo = undefined,
                 .expected_version = null,
+                .huffman_table = decoder_table,
             };
+            decoder.main_data_fifo = std.Io.Writer.Discarding.init(&decoder.main_data_buffer).writer;
+            return decoder;
         } else {
             return mp3_t.MP3_ERROR.NoSyncWordsFound;
         }
@@ -57,20 +57,20 @@ pub const DecoderState = struct {
                 self.cursor = next_frame.next_sync;
                 return mp3_t.MP3_ERROR.MalformedSideData;
             }
-            self.data_buffer.writeSlice(self.bitstream[side_info_end..next_frame.next_sync]) catch return mp3_t.MP3_ERROR.MP3OutOfMemory;
+            _ = self.main_data_fifo.write(self.bitstream[side_info_end..next_frame.next_sync]) catch return mp3_t.MP3_ERROR.MP3OutOfMemory;
 
-            const main_data_size = self.data_buffer.len() - next_frame.next_data_begin;
+            const main_data_size = self.main_data_fifo.buffered().len - next_frame.next_data_begin;
             std.debug.print("main data size {}\n", .{main_data_size});
-            std.debug.print("Buffer size {}\n", .{self.data_buffer.len()});
 
-            var buffer: [960]u8 = @splat(0);
-            self.data_buffer.readFirst(buffer[0..], main_data_size) catch return mp3_t.MP3_ERROR.MalformedSideData;
+            var buffer: [960]u8 = undefined;
+            var reader = std.Io.Reader.fixed(&buffer);
+            _ = reader.stream(&self.main_data_fifo, .limited(main_data_size)) catch return mp3_t.MP3_ERROR.MalformedSideData;
             self.cursor = next_frame.next_sync;
 
             //         const huffman_values: [575]i32 = huffman_decode(buffer[0..]);
             switch (side_info) {
                 .mpeg1_stereo => |info| {
-                    if (huffman_decode(header, info, buffer[0..])) |data| {
+                    if (self.huffman_decode(header, info, buffer[0..])) |data| {
                         return mp3_t.LogicalFrame{
                             .header = header,
                             .side_info = info,
@@ -93,7 +93,7 @@ pub const DecoderState = struct {
         return null;
     }
 
-    fn huffman_decode(header: mp3_t.MP3_HEADER, side_info: mp3_t.SideInfoMpeg1Stereo, bits: []u8) mp3_t.MP3_ERROR![2][2]mp3_t.DecompressedData {
+    fn huffman_decode(self: @This(), header: mp3_t.MP3_HEADER, side_info: mp3_t.SideInfoMpeg1Stereo, bits: []u8) mp3_t.MP3_ERROR![2][2]mp3_t.DecompressedData {
         var result: [2][2]mp3_t.DecompressedData = @splat(@splat(mp3_t.DecompressedData.default));
 
         var reader = bt.BitReader.init_with_limit(bits, 0);
@@ -195,7 +195,7 @@ pub const DecoderState = struct {
                         }
                     },
                 }
-                _ = huffman.huffman_decode(&reader, table_select, info.count1table_select, info.big_values, regionSize, result[gr][ch].data[0..]);
+                _ = self.huffman_table.huffman_decode(&reader, table_select, info.count1table_select, info.big_values, regionSize, result[gr][ch].data[0..]);
             }
         }
 

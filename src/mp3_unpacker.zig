@@ -1,28 +1,28 @@
 const std = @import("std");
 const mp3_t = @import("mp3_types.zig");
+const bit_reader = @import("bit_reader.zig");
 
 const assert = std.debug.assert;
 
 const BitReaderWrapper = struct {
-    internal: std.io.BitReader(std.builtin.Endian.big, std.io.AnyReader),
+    internal: bit_reader.BitReader,
 
     pub fn read(self: *BitReaderWrapper, comptime T: type) !T {
         return switch (@typeInfo(T)) {
-            .bool => (try self.internal.readBitsNoEof(u1, 1)) == 1,
-            .int => self.internal.readBitsNoEof(T, @sizeOf(T)),
+            .bool => (self.internal.readBits(1) orelse @panic("Out of input")) == 1,
+            .int => @intCast(self.internal.readBits(@sizeOf(T)) orelse @panic("Out of input")),
             else => std.debug.panic("Can't deserialize type {}", .{T}),
         };
     }
 };
 
-fn bitReaderWrapper(bitReader: std.io.BitReader(std.builtin.Endian.big, std.io.AnyReader)) BitReaderWrapper {
+fn bitReaderWrapper(bitReader: bit_reader.BitReader) BitReaderWrapper {
     return BitReaderWrapper{ .internal = bitReader };
 }
 
 //TODO refactor out to seperate file
 fn parse_mpeg1_stereo_data(data: []const u8) !mp3_t.MP3_SIDE_INFO {
-    var reader = std.io.fixedBufferStream(data[0..]);
-    const bits = std.io.bitReader(std.builtin.Endian.big, reader.reader().any());
+    const bits = bit_reader.BitReader.init(data);
 
     //TODO use a constructor
     var b = bitReaderWrapper(bits);

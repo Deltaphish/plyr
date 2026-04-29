@@ -1,4 +1,4 @@
-fn RingBufferStatic(comptime T: type, comptime size: comptime_int) type {
+pub fn RingBufferStatic(comptime T: type, comptime size: comptime_int) type {
     return struct {
         const Self = @This();
 

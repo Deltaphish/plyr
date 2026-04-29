@@ -4,56 +4,63 @@ const br = @import("bit_reader.zig");
 
 test "decode R4 Values" {
     // Encode
+    const alloc = std.testing.allocator;
     const buffer = [_]u8{ 0b10101000, 0 };
     var reader = br.BitReader.init(buffer[0..]);
     const plaintext = [_]R4{ TABLE_A[0].getValue().?.val, TABLE_A[1].getValue().?.val, TABLE_A[11].getValue().?.val };
 
     var dest = [_]R4{R4.default} ** 3;
 
-    try std.testing.expectEqual(3, r4_huffman_decoder.decode(0, &reader, dest[0..]));
+    try std.testing.expectEqual(3, initalize_r4_decoder(alloc).decode(0, &reader, dest[0..]));
     try std.testing.expectEqualSlices(R4, plaintext[0..], dest[0..]);
 }
 
-pub fn huffman_decode(reader: *br.BitReader, table_select: [3]u8, count_one_table_select: bool, big_value_count: u16, regionSize: [2]u32, out: []i32) u32 {
-    var big_values = [_]BigValue{BigValue.default} ** 288;
-    var actual_big_value_count: u32 = undefined;
-    const region0_offset = @min(regionSize[0] + regionSize[1], big_value_count);
-    // Region 0
-    actual_big_value_count = bigval_huffman_decoder.decode(table_select[0], reader, big_values[0..regionSize[0]]);
-    //Region 1
-    actual_big_value_count += bigval_huffman_decoder.decode(table_select[1], reader, big_values[regionSize[0]..region0_offset]);
-    //Region 2
-    actual_big_value_count += bigval_huffman_decoder.decode(table_select[2], reader, big_values[region0_offset..big_value_count]);
+pub const Decoder = struct {
+    r4: hm.HuffmanDecoder(R4),
+    big_val: hm.HuffmanDecoder(BigValue),
 
-    var small_values = [_]R4{R4.default} ** 144;
-    const small_values_limit = (576 - big_value_count * 2) / 4;
-    // Plus one to table select, as table_id: 0 is reserved for TABLE_0 where all elements are zero.
-    const small_values_count = r4_huffman_decoder.decode(@as(u8, @intFromBool(count_one_table_select)) + 1, reader, small_values[0..small_values_limit]);
-
-    var i: u32 = 0;
-    for (0..big_value_count) |bi| {
-        out[i] = big_values[bi].x;
-        out[i + 1] = big_values[bi].y;
-        i += 2;
+    pub fn init(alloc: std.mem.Allocator) @This() {
+        return @This(){ .r4 = initalize_r4_decoder(alloc), .big_val = initialize_bigvalue_decoder(alloc) };
     }
 
-    for (0..small_values_count) |si| {
-        out[i] = small_values[si].x;
-        out[i + 1] = small_values[si].y;
-        out[i + 2] = small_values[si].v;
-        out[i + 3] = small_values[si].w;
-        i += 4;
+    pub fn huffman_decode(self: @This(), reader: *br.BitReader, table_select: [3]u8, count_one_table_select: bool, big_value_count: u16, regionSize: [2]u32, out: []i32) u32 {
+        var big_values = [_]BigValue{BigValue.default} ** 288;
+        var actual_big_value_count: u32 = undefined;
+        const region0_offset = @min(regionSize[0] + regionSize[1], big_value_count);
+        // Region 0
+        actual_big_value_count = self.big_val.decode(table_select[0], reader, big_values[0..regionSize[0]]);
+        //Region 1
+        actual_big_value_count += self.big_val.decode(table_select[1], reader, big_values[regionSize[0]..region0_offset]);
+        //Region 2
+        actual_big_value_count += self.big_val.decode(table_select[2], reader, big_values[region0_offset..big_value_count]);
+
+        var small_values = [_]R4{R4.default} ** 144;
+        const small_values_limit = (576 - big_value_count * 2) / 4;
+        // Plus one to table select, as table_id: 0 is reserved for TABLE_0 where all elements are zero.
+        const small_values_count = self.r4.decode(@as(u8, @intFromBool(count_one_table_select)) + 1, reader, small_values[0..small_values_limit]);
+
+        var i: u32 = 0;
+        for (0..big_value_count) |bi| {
+            out[i] = big_values[bi].x;
+            out[i + 1] = big_values[bi].y;
+            i += 2;
+        }
+
+        for (0..small_values_count) |si| {
+            out[i] = small_values[si].x;
+            out[i + 1] = small_values[si].y;
+            out[i + 2] = small_values[si].v;
+            out[i + 3] = small_values[si].w;
+            i += 4;
+        }
+        return small_values_count + big_value_count;
     }
-    return small_values_count + big_value_count;
-}
+};
+//TODO: Move args into struct
 
-const r4_huffman_decoder = initalize_r4_decoder();
-const bigval_huffman_decoder = initialize_bigvalue_decoder();
-
-fn initalize_r4_decoder() hm.HuffmanDecoder(R4, 2) {
-    // Needed for comptime to not complain about depth
-    @setEvalBranchQuota(10000);
-    const decoder = hm.HuffmanDecoder(R4, 2).init_with_strategy(
+fn initalize_r4_decoder(alloc: std.mem.Allocator) hm.HuffmanDecoder(R4) {
+    const decoder = hm.HuffmanDecoder(R4).init_with_strategy(
+        alloc,
         r4_decoding_strategy,
         &[_]hm.HuffmanTable(R4){
             hm.HuffmanTable(R4){ .rows = TABLE_A[0..], .id = 1 },
@@ -63,11 +70,9 @@ fn initalize_r4_decoder() hm.HuffmanDecoder(R4, 2) {
     return decoder;
 }
 
-fn initialize_bigvalue_decoder() hm.HuffmanDecoder(BigValue, 215) {
-    // Needed for comptime to not complain about depth
-    @setEvalBranchQuota(1000000);
-
-    var decoder = hm.HuffmanDecoder(BigValue, 215).init_with_strategy(
+fn initialize_bigvalue_decoder(alloc: std.mem.Allocator) hm.HuffmanDecoder(BigValue) {
+    var decoder = hm.HuffmanDecoder(BigValue).init_with_strategy(
+        alloc,
         bigval_decoding_strategy,
         &[_]hm.HuffmanTable(BigValue){
             hm.HuffmanTable(BigValue){ .id = 1, .rows = TABLE_1[0..] },
@@ -107,6 +112,7 @@ fn initialize_bigvalue_decoder() hm.HuffmanDecoder(BigValue, 215) {
 }
 
 test "Initalize R4 subtables correctly" {
+    const r4_huffman_decoder = initalize_r4_decoder(std.testing.allocator);
     for (r4_huffman_decoder.subtables) |subtable| {
         for (subtable) |slot| {
             try std.testing.expect(
@@ -117,6 +123,7 @@ test "Initalize R4 subtables correctly" {
 }
 
 test "Initalize BigVal subtables correctly" {
+    const bigval_huffman_decoder = initialize_bigvalue_decoder(std.testing.allocator);
     for (bigval_huffman_decoder.subtables[1..]) |subtable| {
         for (subtable) |slot| {
             try std.testing.expect(
@@ -268,6 +275,8 @@ test "r4 decoding strategy" {
 }
 
 test "bigval decode" {
+    const bigval_huffman_decoder = initialize_bigvalue_decoder(std.testing.allocator);
+
     const encoded = [_]u8{ 0b10010010, 0b00000000 };
     var reader = br.BitReader.init(encoded[0..]);
 
@@ -285,6 +294,8 @@ test "bigval decode" {
 }
 
 test "bigval decode with signs" {
+    const bigval_huffman_decoder = initialize_bigvalue_decoder(std.testing.allocator);
+
     const encoded = [_]u8{ 0b10011011, 0b00011000 };
     var reader = br.BitReader.init(encoded[0..]);
 
@@ -305,6 +316,8 @@ test "bigval decode with linbits" {
     // FROM TABLE 31
     //    BigCode.init(0b00101111001, 11, BigValue{ .x = 8, .y = 14 }),
     //    BigCode.init(0b00010000, 8, BigValue{ .x = 8, .y = 15 }),
+
+    const bigval_huffman_decoder = initialize_bigvalue_decoder(std.testing.allocator);
 
     const encoded = [_]u8{ 0b00101111, 0b00100000, 0b10000011, 0b11111111, 0b11100000 };
     var reader = br.BitReader.init(encoded[0..]);

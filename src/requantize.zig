@@ -14,7 +14,7 @@ pub fn requantize(frame: mp3_t.LogicalFrame) mp3_t.RequantizedFrame {
             const info = result.side_info.granules[gr][ch];
             const decodedData: mp3_t.DecompressedData = frame.data[gr][ch];
             switch (info.block_info) {
-                .long_block => |_| {
+                .long_block => {
                     for (0..576) |ix| {
                         const i: u32 = @intCast(ix);
                         const sb = getScaleBand(true, result.header.freq, i);

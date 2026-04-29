@@ -4,6 +4,7 @@ const config = @import("config");
 const id3 = @import("id3.zig");
 const mp3_unpack = @import("mp3_unpacker.zig");
 const mp3_decode = @import("mp3_decoder.zig");
+const mp3_tables = @import("mp3_table.zig");
 const mp3_t = @import("mp3_types.zig");
 
 const mp3_requant = @import("requantize.zig");
@@ -11,61 +12,63 @@ const mp3_alias = @import("alias_reduction.zig");
 
 const mp3_imdct = @import("./imdct.zig");
 
-pub fn main() !void {
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+
+    var stdout_buffer: [1024]u8 = undefined;
+
+    const stdout_file = std.Io.File.stdout().writer(io, &stdout_buffer);
+    var stdout = stdout_file.interface;
 
     const files = [_][]const u8{
         "./data1.mp3",
     };
 
-    var alloc = std.heap.GeneralPurposeAllocator(.{}){};
+    const alloc = init.gpa;
 
     var buffer = [_]u8{0} ** 2332227;
 
     for (files) |file| {
-        _ = try std.fs.cwd().readFile(file, &buffer);
+        _ = try std.Io.Dir.cwd().readFile(io, file, &buffer);
 
-        const tag = try id3.parse_id3_tag(&buffer, alloc.allocator());
-        defer tag.frames.deinit();
+        var tag = try id3.parse_id3_tag(&buffer, alloc);
+        defer tag.frames.deinit(alloc);
 
         if (config.verbose_id3) {
             id3.debug_id3_tag(tag);
         }
 
         const mp3_data = buffer[(tag.header.size + 10)..];
+        const huffman_tables = mp3_tables.Decoder.init(alloc);
 
-        var decoder = try mp3_decode.DecoderState.init(mp3_data);
+        var decoder = try mp3_decode.DecoderState.init(huffman_tables, mp3_data);
 
         var count: usize = 0;
         var bad_frames: usize = 0;
         while (true) {
             if (decoder.next()) |maybeFrame| {
                 if (maybeFrame) |frame| {
-                    try bw.writer().print("Version {}\n", .{frame.header.mpeg_version});
-                    try bw.writer().print("Sampling rate {}\n", .{frame.header.freq});
-                    try bw.writer().print("big_count {}\n", .{frame.side_info.granules[0][1].big_values});
-                    try bw.writer().print("Data {any}\n", .{frame.data[1][0].data});
+                    try stdout.print("Version {}\n", .{frame.header.mpeg_version});
+                    try stdout.print("Sampling rate {}\n", .{frame.header.freq});
+                    try stdout.print("big_count {}\n", .{frame.side_info.granules[0][1].big_values});
+                    try stdout.print("Data {any}\n", .{frame.data[1][0].data});
 
                     var q_frame = mp3_requant.requantize(frame);
                     mp3_alias.alias_reduction(&q_frame);
                     const samples = mp3_imdct.convertToSamples(null, q_frame);
-
-                    try bw.writer().print("Quantized data: {any}\n", .{samples[0][1]});
-
-                    try bw.flush();
+                    try stdout.print("{any}\n", .{samples.data[0][0]});
                     count += 1;
                 } else {
                     break; // End of file
                 }
             } else |err| switch (err) {
                 mp3_t.MP3_ERROR.MalformedData => {
-                    try bw.writer().print("Found bad frame (main)\n", .{});
+                    try stdout.print("Found bad frame (main)\n", .{});
                     bad_frames += 1;
                     continue;
                 },
                 mp3_t.MP3_ERROR.MalformedSideData => {
-                    try bw.writer().print("Found bad frame (side)\n", .{});
+                    try stdout.print("Found bad frame (side)\n", .{});
                     bad_frames += 1;
                     continue;
                 },
@@ -75,9 +78,9 @@ pub fn main() !void {
                 },
             }
         }
-        try bw.writer().print("Found {} frames, skipped {} frames\n", .{ count, bad_frames });
+        try stdout.print("Found {} frames, skipped {} frames\n", .{ count, bad_frames });
     }
-    try bw.flush();
+    try stdout.flush();
 }
 
 test "simple test" {

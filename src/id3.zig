@@ -38,7 +38,8 @@ pub const ID3_FRAME = struct { id: *const [4]u8, size: u32, flags: u16, data: []
 pub fn parse_id3_tag(data: []const u8, alloc: std.mem.Allocator) ID3_Error!ID3_TAG {
     const header = try parse_id3_header(data);
 
-    var frames = std.ArrayList(ID3_FRAME).init(alloc);
+    //TODO: Rename to OutOfMemoryError
+    var frames = std.ArrayList(ID3_FRAME).initCapacity(alloc, 10) catch return ID3_Error.AllocatorError;
 
     const frame_data = data[10..];
     var cursor: usize = 0;
@@ -49,7 +50,7 @@ pub fn parse_id3_tag(data: []const u8, alloc: std.mem.Allocator) ID3_Error!ID3_T
             break;
         }
         cursor += frame.size + 10;
-        const frame_ptr = frames.addOne() catch return ID3_Error.AllocatorError;
+        const frame_ptr = frames.addOne(alloc) catch return ID3_Error.AllocatorError;
         frame_ptr.* = frame;
     }
 
