@@ -1,40 +1,37 @@
 const std = @import("std");
 
+const bands = @import("scalefactor_table.zig");
+const bt = @import("bit_reader.zig");
+const huffman = @import("mp3_table.zig");
 const mp3_t = @import("mp3_types.zig");
 const mp3_unpack = @import("mp3_unpacker.zig");
-const huffman = @import("mp3_table.zig");
-const bt = @import("bit_reader.zig");
-const bands = @import("scalefactor_table.zig");
 const ring = @import("ring.zig");
 
 pub const DecoderState = struct {
     bitstream: []const u8,
     cursor: usize,
     expected_version: ?mp3_t.MPEG_VERSION,
-    main_data_buffer: [2000]u8,
-    main_data_fifo: std.Io.Writer,
+    main_data_fifo: ring.RingBuffer(2000),
     huffman_table: huffman.Decoder,
 
     pub fn init(decoder_table: huffman.Decoder, data: []const u8) mp3_t.MP3_ERROR!DecoderState {
         if (find_sync_word(data, 0)) |offset| {
-            var decoder = DecoderState{
+            return DecoderState{
                 .bitstream = data,
                 .cursor = offset,
-                .main_data_buffer = undefined,
-                .main_data_fifo = undefined,
+                .main_data_fifo = ring.RingBuffer(2000).init(),
                 .expected_version = null,
                 .huffman_table = decoder_table,
             };
-            decoder.main_data_fifo = std.Io.Writer.Discarding.init(&decoder.main_data_buffer).writer;
-            return decoder;
         } else {
             return mp3_t.MP3_ERROR.NoSyncWordsFound;
         }
     }
 
-    pub fn next(self: *DecoderState) mp3_t.MP3_ERROR!?mp3_t.LogicalFrame {
+    pub fn next(self: *DecoderState, dest: *?mp3_t.LogicalFrame) mp3_t.MP3_ERROR!void {
         if (self.cursor > self.bitstream.len - 2) {
-            return null;
+            dest.* = null;
+            return mp3_t.MP3_ERROR.MP3OutOfMemory;
         }
         //Cursor is at syncword
         std.debug.assert(self.bitstream[self.cursor] == 0xFF);
@@ -57,25 +54,34 @@ pub const DecoderState = struct {
                 self.cursor = next_frame.next_sync;
                 return mp3_t.MP3_ERROR.MalformedSideData;
             }
-            _ = self.main_data_fifo.write(self.bitstream[side_info_end..next_frame.next_sync]) catch return mp3_t.MP3_ERROR.MP3OutOfMemory;
+            self.main_data_fifo.write(self.bitstream[side_info_end..next_frame.next_sync]);
 
-            const main_data_size = self.main_data_fifo.buffered().len - next_frame.next_data_begin;
+            const main_data_size = self.main_data_fifo.to_read() - next_frame.next_data_begin;
             std.debug.print("main data size {}\n", .{main_data_size});
 
-            var buffer: [960]u8 = undefined;
-            var reader = std.Io.Reader.fixed(&buffer);
-            _ = reader.stream(&self.main_data_fifo, .limited(main_data_size)) catch return mp3_t.MP3_ERROR.MalformedSideData;
+            var buffer: [960]u8 = @splat(0);
+            const read_count = self.main_data_fifo.read(buffer[0..main_data_size]);
+
+            // Make sure that we read main_data_size, if not there was not enough data in the buffer
+            if (read_count != main_data_size) {
+                std.debug.print("Tried to read {} but only {} was available\n", .{ main_data_size, read_count });
+            }
+            std.debug.assert(read_count == main_data_size);
+
             self.cursor = next_frame.next_sync;
 
             //         const huffman_values: [575]i32 = huffman_decode(buffer[0..]);
             switch (side_info) {
                 .mpeg1_stereo => |info| {
-                    if (self.huffman_decode(header, info, buffer[0..])) |data| {
-                        return mp3_t.LogicalFrame{
-                            .header = header,
-                            .side_info = info,
-                            .data = data,
-                        };
+                    dest.* = mp3_t.LogicalFrame{
+                        .header = header,
+                        .side_info = info,
+                        .data = @splat(@splat(mp3_t.DecompressedData.default)),
+                    };
+                    errdefer dest.* = null;
+
+                    if (self.huffman_decode(header, info, buffer[0..], &dest.*.?.data)) |_| {
+                        return;
                     } else |err| {
                         std.debug.print("Header: {}\nSideInfo: {}\n g00: {}\n g01: {}\n g10: {}\n g11: {}\n", .{
                             header,
@@ -90,12 +96,10 @@ pub const DecoderState = struct {
                 },
             }
         }
-        return null;
+        return;
     }
 
-    fn huffman_decode(self: @This(), header: mp3_t.MP3_HEADER, side_info: mp3_t.SideInfoMpeg1Stereo, bits: []u8) mp3_t.MP3_ERROR![2][2]mp3_t.DecompressedData {
-        var result: [2][2]mp3_t.DecompressedData = @splat(@splat(mp3_t.DecompressedData.default));
-
+    fn huffman_decode(self: @This(), header: mp3_t.MP3_HEADER, side_info: mp3_t.SideInfoMpeg1Stereo, bits: []u8, dest: *[2][2]mp3_t.DecompressedData) mp3_t.MP3_ERROR!void {
         var reader = bt.BitReader.init_with_limit(bits, 0);
 
         for (0..2) |gr| {
@@ -119,6 +123,11 @@ pub const DecoderState = struct {
                         table_select[1] = block.table_select[1];
                         table_select[2] = block.table_select[2];
 
+                        if (@max(table_select[0], table_select[1], table_select[2]) > 40) {
+                            //Invalid table_select
+                            return;
+                        }
+
                         regionSize[0] = @min(info.big_values, bands.scalefactor_table.getBandSize(
                             header.freq,
                             true,
@@ -132,28 +141,33 @@ pub const DecoderState = struct {
 
                         if (!side_info.scfsi[ch][0] or gr == 0) {
                             for (0..6) |sfb| {
-                                result[gr][ch].scalefac_l[sfb] = @truncate(reader.readBits(scalefac_size.slen1) orelse return mp3_t.MP3_ERROR.MalformedData);
+                                dest[gr][ch].scalefac_l[sfb] = @truncate(reader.readBits(scalefac_size.slen1) orelse return mp3_t.MP3_ERROR.MalformedData);
                             }
                         }
                         if (!side_info.scfsi[ch][1] or gr == 0) {
                             for (6..11) |sfb| {
-                                result[gr][ch].scalefac_l[sfb] = @truncate(reader.readBits(scalefac_size.slen1) orelse return mp3_t.MP3_ERROR.MalformedData);
+                                dest[gr][ch].scalefac_l[sfb] = @truncate(reader.readBits(scalefac_size.slen1) orelse return mp3_t.MP3_ERROR.MalformedData);
                             }
                         }
                         if (!side_info.scfsi[ch][2] or gr == 0) {
                             for (11..16) |sfb| {
-                                result[gr][ch].scalefac_l[sfb] = @truncate(reader.readBits(scalefac_size.slen2) orelse return mp3_t.MP3_ERROR.MalformedData);
+                                dest[gr][ch].scalefac_l[sfb] = @truncate(reader.readBits(scalefac_size.slen2) orelse return mp3_t.MP3_ERROR.MalformedData);
                             }
                         }
                         if (!side_info.scfsi[ch][3] or gr == 0) {
                             for (16..21) |sfb| {
-                                result[gr][ch].scalefac_l[sfb] = @truncate(reader.readBits(scalefac_size.slen2) orelse return mp3_t.MP3_ERROR.MalformedData);
+                                dest[gr][ch].scalefac_l[sfb] = @truncate(reader.readBits(scalefac_size.slen2) orelse return mp3_t.MP3_ERROR.MalformedData);
                             }
                         }
                     },
                     .windowed_block => |block| {
                         table_select[0] = block.table_select[0];
                         table_select[1] = block.table_select[1];
+                        table_select[2] = 0;
+                        if (@max(table_select[0], table_select[1], table_select[2]) > 40) {
+                            //Invalid table_select
+                            return;
+                        }
                         if (block.mixed_block_flag) {
                             regionSize[0] = @min(info.big_values, bands.scalefactor_table.getBandSize(
                                 header.freq,
@@ -163,16 +177,16 @@ pub const DecoderState = struct {
                             regionSize[1] = info.big_values - regionSize[0];
 
                             for (0..8) |sfb| {
-                                result[gr][ch].scalefac_l[sfb] = @truncate(reader.readBits(scalefac_size.slen1) orelse return mp3_t.MP3_ERROR.MalformedData);
+                                dest[gr][ch].scalefac_l[sfb] = @truncate(reader.readBits(scalefac_size.slen1) orelse return mp3_t.MP3_ERROR.MalformedData);
                             }
                             for (3..6) |sfb| {
                                 for (0..3) |window| {
-                                    result[gr][ch].scalefac_s[sfb][window] = @truncate(reader.readBits(scalefac_size.slen1) orelse return mp3_t.MP3_ERROR.MalformedData);
+                                    dest[gr][ch].scalefac_s[sfb][window] = @truncate(reader.readBits(scalefac_size.slen1) orelse return mp3_t.MP3_ERROR.MalformedData);
                                 }
                             }
                             for (6..12) |sfb| {
                                 for (0..3) |window| {
-                                    result[gr][ch].scalefac_s[sfb][window] = @truncate(reader.readBits(scalefac_size.slen2) orelse return mp3_t.MP3_ERROR.MalformedData);
+                                    dest[gr][ch].scalefac_s[sfb][window] = @truncate(reader.readBits(scalefac_size.slen2) orelse return mp3_t.MP3_ERROR.MalformedData);
                                 }
                             }
                         } else {
@@ -184,22 +198,20 @@ pub const DecoderState = struct {
                             regionSize[1] = info.big_values - regionSize[0];
                             for (0..6) |sfb| {
                                 for (0..3) |window| {
-                                    result[gr][ch].scalefac_s[sfb][window] = @truncate(reader.readBits(scalefac_size.slen1) orelse return mp3_t.MP3_ERROR.MalformedData);
+                                    dest[gr][ch].scalefac_s[sfb][window] = @truncate(reader.readBits(scalefac_size.slen1) orelse return mp3_t.MP3_ERROR.MalformedData);
                                 }
                             }
                             for (6..12) |sfb| {
                                 for (0..3) |window| {
-                                    result[gr][ch].scalefac_s[sfb][window] = @truncate(reader.readBits(scalefac_size.slen2) orelse return mp3_t.MP3_ERROR.MalformedData);
+                                    dest[gr][ch].scalefac_s[sfb][window] = @truncate(reader.readBits(scalefac_size.slen2) orelse return mp3_t.MP3_ERROR.MalformedData);
                                 }
                             }
                         }
                     },
                 }
-                _ = self.huffman_table.huffman_decode(&reader, table_select, info.count1table_select, info.big_values, regionSize, result[gr][ch].data[0..]);
+                _ = self.huffman_table.huffman_decode(&reader, table_select, info.count1table_select, info.big_values, regionSize, dest[gr][ch].data[0..576]);
             }
         }
-
-        return result;
     }
 
     const Scalefac_Size = struct {

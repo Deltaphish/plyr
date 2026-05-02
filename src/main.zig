@@ -16,16 +16,19 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
 
     var stdout_buffer: [1024]u8 = undefined;
-
-    const stdout_file = std.Io.File.stdout().writer(io, &stdout_buffer);
-    var stdout = stdout_file.interface;
+    var stdout_file_writer: std.Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
+    const stdout = &stdout_file_writer.interface;
 
     const files = [_][]const u8{
         "./data1.mp3",
     };
 
     const alloc = init.gpa;
-    const huffman_tables = mp3_tables.Decoder.init(alloc);
+
+    //const alloc = init.gpa;
+    var huffman_tables = mp3_tables.Decoder.init(alloc);
+    defer huffman_tables.big_val.deinit();
+    defer huffman_tables.r4.deinit();
 
     var buffer = [_]u8{0} ** 2332227;
 
@@ -46,17 +49,18 @@ pub fn main(init: std.process.Init) !void {
         var count: usize = 0;
         var bad_frames: usize = 0;
         while (true) {
-            if (decoder.next()) |maybeFrame| {
-                if (maybeFrame) |frame| {
+            var maybe_frame: ?mp3_t.LogicalFrame = null;
+            if (decoder.next(&maybe_frame)) {
+                if (maybe_frame) |frame| {
                     try stdout.print("Version {}\n", .{frame.header.mpeg_version});
                     try stdout.print("Sampling rate {}\n", .{frame.header.freq});
                     try stdout.print("big_count {}\n", .{frame.side_info.granules[0][1].big_values});
-                    try stdout.print("Data {any}\n", .{frame.data[1][0].data});
+                    //try stdout.print("Data {any}\n", .{frame.data[1][0].data[0..576]});
 
                     var q_frame = mp3_requant.requantize(frame);
                     mp3_alias.alias_reduction(&q_frame);
-                    const samples = mp3_imdct.convertToSamples(null, q_frame);
-                    try stdout.print("{any}\n", .{samples.data[0][0]});
+                    //const samples = mp3_imdct.convertToSamples(null, q_frame);
+                    //try stdout.print("{any}\n", .{samples.data[0][0]});
                     count += 1;
                 } else {
                     break; // End of file
@@ -77,15 +81,9 @@ pub fn main(init: std.process.Init) !void {
                     break;
                 },
             }
+            try stdout.flush();
         }
         try stdout.print("Found {} frames, skipped {} frames\n", .{ count, bad_frames });
     }
     try stdout.flush();
-}
-
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
 }

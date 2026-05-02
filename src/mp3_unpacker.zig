@@ -51,7 +51,6 @@ fn parse_mpeg1_stereo_data(data: []const u8) !mp3_t.MP3_SIDE_INFO {
             const big_values = try b.read(u9);
             const global_gain = try b.read(u8);
             const scalefac_compress = try b.read(u4);
-            std.debug.print("scalefac_compress {}\n", .{scalefac_compress});
             const window_switching_flag = try b.read(bool);
 
             //TODO use initializer

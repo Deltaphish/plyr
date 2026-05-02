@@ -18,18 +18,20 @@ pub fn HuffmanTable(comptime T: type) type {
 pub fn HuffmanDecoder(comptime T: type) type {
     return struct {
         subtables: std.ArrayList([SUBTABLE_SIZE]Entry(T)),
-        table_ix: [64]u32, // TODO: Compute table size based on table count.
+        table_ix: [32]u32, // TODO: Compute table size based on table count.
         strategy: ?*const fn (table_id: u32, reader: *bit_reader.BitReader, val: T) T,
         allocator: std.mem.Allocator,
+
+        const Self = @This();
 
         pub fn init(tables: []const HuffmanTable(T), allocator: std.mem.Allocator) @This() {
 
             //TODO: Finetune capacity
-            var subtables = std.ArrayList([SUBTABLE_SIZE]Entry(T)).initCapacity(allocator, 40) catch @panic("OFM");
+            var subtables = std.ArrayList([SUBTABLE_SIZE]Entry(T)).initCapacity(allocator, 80) catch @panic("OFM");
 
             var sub_alloc = SubTableAlloc(T).init(&subtables, allocator);
 
-            var index: [64]u32 = [_]u32{0} ** 64;
+            var index: [32]u32 = [_]u32{0} ** 32;
 
             for (tables) |table| {
                 std.debug.print("Waka {}", .{table.id});
@@ -44,8 +46,8 @@ pub fn HuffmanDecoder(comptime T: type) type {
             };
         }
 
-        pub fn deinit(self: @This()) void {
-            self.subtables.deinit(self.allocator);
+        pub fn deinit(self: *Self) void {
+            self.*.subtables.deinit(self.allocator);
         }
 
         pub fn init_with_strategy(allocator: std.mem.Allocator, strategy: *const fn (table_id: u32, reader: *bit_reader.BitReader, val: T) T, tables: []const HuffmanTable(T)) @This() {
@@ -56,12 +58,18 @@ pub fn HuffmanDecoder(comptime T: type) type {
 
         pub fn alias_table(self: *@This(), from: u32, to: u32) void {
             // No unintialized tables
+            if (self.table_ix[to] == std.math.maxInt(u32)) {
+                std.debug.print("Tried to alias {} to uninitalized table {}", .{ from, to });
+            }
             std.debug.assert(self.table_ix[to] != std.math.maxInt(u32));
             self.table_ix[from] = self.table_ix[to];
         }
 
         fn beginQuery(self: @This(), table_id: u32, byte: u8) Entry(T) {
             // No unintialized tables
+            if (self.table_ix[table_id] == std.math.maxInt(u32)) {
+                std.debug.print("Tried to query {} to uninitalized table", .{table_id});
+            }
             std.debug.assert(self.table_ix[table_id] != std.math.maxInt(u32));
             return self.query(self.table_ix[table_id], byte);
         }
@@ -100,6 +108,9 @@ pub fn HuffmanDecoder(comptime T: type) type {
                     const b = reader.readByte() orelse return dest_it;
                     entry = self.queryLink(entry, b);
                 }
+                if (entry != .val) {
+                    std.debug.print("entry not a value, found {}", .{entry});
+                }
                 std.debug.assert(entry == .val);
 
                 var val = entry.val;
@@ -135,21 +146,23 @@ pub fn HuffmanDecoder(comptime T: type) type {
 test "Decode u32s" {
     const IntCode = HuffmanCode(u32);
     const rows = [_]IntCode{
-        IntCode.init(0b1, 1, 1),
-        IntCode.init(0b001, 3, 2),
-        IntCode.init(0b01, 2, 3),
-        IntCode.init(0b000000000, 9, 4),
+        IntCode.init(0b00, 2, 1),
+        IntCode.init(0b01, 2, 2),
+        IntCode.init(0b10, 2, 3),
+        IntCode.init(0b11, 2, 4),
     };
 
-    const table = HuffmanTable(u32).init(0, rows[0..]);
-    var decoder = HuffmanDecoder(u32, 200).init(&[_]HuffmanTable(u32){table});
+    const table = HuffmanTable(u32).init(1, rows[0..]);
+
+    var decoder = HuffmanDecoder(u32).init(&[_]HuffmanTable(u32){table}, std.testing.allocator);
+    defer decoder.deinit();
 
     const plaintext = [_]u32{ 1, 2, 3, 3, 2, 1, 4 };
-    const bitstream = [_]u8{ 0b10010101, 0b00110000, 0b00000000 };
+    const bitstream = [_]u8{ 0b00011010, 0b01001100 };
     var dest = [_]u32{0} ** 7;
 
     var reader = bit_reader.BitReader.init(bitstream[0..]);
-    try std.testing.expectEqual(7, decoder.decode(0, &reader, dest[0..]));
+    try std.testing.expectEqual(7, decoder.decode(1, &reader, dest[0..]));
     try std.testing.expectEqualSlices(u32, plaintext[0..], dest[0..]);
 }
 
@@ -162,7 +175,7 @@ fn dummy_strat(_: u32, reader: *bit_reader.BitReader, val: u32) u32 {
     return val;
 }
 
-test "Decode u32s with strategy" {
+test "Decode u32 with strategy" {
     const IntCode = HuffmanCode(u32);
     const rows = [_]IntCode{
         IntCode.init(0b1, 1, 1),
@@ -176,7 +189,7 @@ test "Decode u32s with strategy" {
     const plaintext = [_]u32{ 1, 2, 3, 3, 2, 1, 7 };
     const bitstream = [_]u8{ 0b10010101, 0b00110001, 0b10000000 };
 
-    var decoder = HuffmanDecoder(u32, 200).init_with_strategy(dummy_strat, &[_]HuffmanTable(u32){table});
+    var decoder = HuffmanDecoder(u32).init_with_strategy(std.testing.allocator, dummy_strat, &[_]HuffmanTable(u32){table});
     var dest = [_]u32{0} ** 7;
     var reader = bit_reader.BitReader.init(bitstream[0..]);
     try std.testing.expectEqual(7, decoder.decode(0, &reader, dest[0..]));
@@ -185,6 +198,7 @@ test "Decode u32s with strategy" {
 
 const HuffmanError = error{
     OutOfSubTables,
+    OutOfMemory,
 };
 
 pub fn HuffmanCode(comptime value: anytype) type {
@@ -238,22 +252,30 @@ fn SubTableAlloc(T: anytype) type {
         }
 
         fn alloc(self: *@This()) HuffmanError!u32 {
-            const addr: u32 = @intCast(self.subtables.items.len);
-            const next: *[SUBTABLE_SIZE]Entry(T) = self.subtables.addOne(self.allocator) catch @panic("OFM");
+            const addr = self.subtables.items.len;
+            const next: *[SUBTABLE_SIZE]Entry(T) = self.subtables.addOne(self.allocator) catch return HuffmanError.OutOfMemory;
             next.* = @splat(Entry(T).none);
-            return addr;
+            return @intCast(addr);
         }
 
         fn get(self: @This(), ix: u32) []Entry(T) {
             std.debug.assert(ix < self.subtables.items.len);
             return &self.subtables.items[ix];
         }
+
+        fn set(self: @This(), ix: u32, src: []Entry(T)) void {
+            std.debug.assert(ix < self.subtables.items.len);
+            @memcpy(&self.subtables.items[ix], src);
+        }
     };
 }
 
 test "SubTableAlloc sanity test" {
     var buffer = [_][SUBTABLE_SIZE]Entry(u8){[_]Entry(u8){.none} ** SUBTABLE_SIZE} ** 10;
-    var alloc = SubTableAlloc(u8).init(&buffer);
+    var list = try std.ArrayList([SUBTABLE_SIZE]Entry(u8)).initCapacity(std.testing.allocator, 10);
+    try list.appendSlice(std.testing.allocator, buffer[0..]);
+
+    var alloc = SubTableAlloc(u8).init(&list, std.testing.allocator);
 
     const table_1 = try alloc.alloc();
     const table_2 = try alloc.alloc();
@@ -268,18 +290,14 @@ test "SubTableAlloc sanity test" {
 
 fn Frame(comptime T: anytype) type {
     return struct {
-        items_buffer: [INIT_BUFF_SIZE]HuffmanCode(T),
         items: std.ArrayList(HuffmanCode(T)),
         subtable_addr: u32,
 
-        pub fn init(subtable_addr: u32) @This() {
-            var f = @This(){
-                .items_buffer = undefined,
-                .items = undefined,
+        pub fn init(alloc: std.mem.Allocator, subtable_addr: u32) @This() {
+            return @This(){
+                .items = std.ArrayList(HuffmanCode(T)).initCapacity(alloc, 8) catch @panic("Out of memory"),
                 .subtable_addr = subtable_addr,
             };
-            f.items = std.ArrayList(HuffmanCode(T)).initBuffer(&f.items_buffer);
-            return f;
         }
     };
 }
@@ -291,32 +309,29 @@ fn populateSubtable(comptime T: type, alloc: *SubTableAlloc(T), nodes: []const H
 
     // TODO: Finetune magic number for stack
 
-    var stack_buffer: [INIT_BUFF_SIZE]Frame(T) = undefined;
-    var stack = std.ArrayList(Frame(T)).initBuffer(&stack_buffer);
+    // Frames are only needed here, use an arena for alloc
+    // TODO: Dont steal alloc from subtable alloc
+    var arena = std.heap.ArenaAllocator.init(alloc.allocator);
+    defer arena.deinit();
 
-    var ba_buffer: [INIT_BUFF_SIZE]HuffmanCode(T) = undefined;
-
-    var inital_ba = std.ArrayList(HuffmanCode(T)).initBuffer(&ba_buffer);
-    inital_ba.appendSliceAssumeCapacity(nodes);
+    var stack = std.ArrayList(Frame(T)).initCapacity(arena.allocator(), 8) catch @panic("Out of memory");
 
     const addr = alloc.alloc() catch @panic("Subtable allocation error");
 
-    var initial_stack = Frame(T).init(addr);
-    initial_stack.items.appendSliceAssumeCapacity(nodes);
+    var initial_stack = Frame(T).init(arena.allocator(), addr);
+    initial_stack.items.appendSlice(arena.allocator(), nodes) catch @panic("Out of memory");
     stack.appendAssumeCapacity(initial_stack);
 
     while (stack.pop()) |frame| {
-        innerPopulateSubtable(T, alloc, frame.subtable_addr, frame.items.items[0..], &stack);
+        innerPopulateSubtable(T, arena.allocator(), alloc, frame.subtable_addr, frame.items.items[0..], &stack);
     }
     return addr;
 }
 
-fn innerPopulateSubtable(comptime T: type, alloc: *SubTableAlloc(T), subtable_addr: u32, nodes: []const HuffmanCode(T), stack: *std.ArrayList(Frame(T))) void {
-    var buffer: [1000]u8 = undefined;
-    var fba: std.heap.FixedBufferAllocator = .init(&buffer);
+fn innerPopulateSubtable(comptime T: type, arena: std.mem.Allocator, alloc: *SubTableAlloc(T), subtable_addr: u32, nodes: []const HuffmanCode(T), stack: *std.ArrayList(Frame(T))) void {
     var buckets = [_]?std.ArrayList(HuffmanCode(T)){null} ** 255;
 
-    var subtable = alloc.get(subtable_addr);
+    var subtable: [SUBTABLE_SIZE]Entry(T) = @splat(.none);
 
     for (nodes) |node| {
         const data = node.getValue() orelse break;
@@ -333,16 +348,16 @@ fn innerPopulateSubtable(comptime T: type, alloc: *SubTableAlloc(T), subtable_ad
             const key = node.code >> delta;
             if (buckets[key] == null) {
                 const linked_subtable = alloc.alloc() catch @panic("Out of subtables");
-                buckets[key] = std.ArrayList(HuffmanCode(T)).initCapacity(fba.allocator(), 4) catch unreachable;
+                buckets[key] = std.ArrayList(HuffmanCode(T)).initCapacity(arena, 4) catch unreachable;
                 subtable[key] = Entry(T){ .link = linked_subtable };
             }
-            buckets[key].?.append(fba.allocator(), node) catch @panic("\nToo many children for one id, increase buckets child size\n");
+            buckets[key].?.append(arena, node) catch @panic("\nToo many children for one id, increase buckets child size\n");
         }
     }
     for (buckets, 0..) |maybeBucket, i| {
         if (maybeBucket) |bucket| {
             const link = subtable[i].link;
-            var frame = Frame(T).init(link);
+            var frame = Frame(T).init(arena, link);
             for (bucket.items) |code| {
                 const c: HuffmanCode(T) = code;
                 const val = c.val orelse @panic("AAAAAH");
@@ -352,9 +367,17 @@ fn innerPopulateSubtable(comptime T: type, alloc: *SubTableAlloc(T), subtable_ad
                 const new_code = ((@as(u32, 1) << (new_length)) - 1) & old_code;
 
                 const new_c = HuffmanCode(T).init(new_code, new_length, val.val);
-                frame.items.appendBounded(new_c) catch @panic("Out of subtables");
+                frame.items.append(arena, new_c) catch @panic("Out of subtables");
             }
-            stack.appendBounded(frame) catch @panic("Too many children for frame");
+            stack.append(arena, frame) catch @panic("Too many children for frame");
         }
+    }
+    alloc.set(subtable_addr, &subtable);
+    for (subtable) |entry| {
+        if (entry == .none) {
+            std.debug.print("Nodes:: {any}\n", .{nodes});
+            std.debug.print("{any}", .{subtable});
+        }
+        std.debug.assert(entry != .none);
     }
 }
