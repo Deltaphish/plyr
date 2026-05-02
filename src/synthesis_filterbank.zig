@@ -1,7 +1,7 @@
 const std = @import("std");
 const d_vector: DVector = @import("./d_vector.zon");
 
-const ringBuffer = @import("./ring.zig");
+const ringBuffer = @import("./fifo.zig");
 
 const DVector = struct {
     vector: [512]f32,

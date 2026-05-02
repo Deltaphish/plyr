@@ -32,6 +32,7 @@ pub fn HuffmanDecoder(comptime T: type) type {
             var index: [64]u32 = [_]u32{0} ** 64;
 
             for (tables) |table| {
+                std.debug.print("Waka {}", .{table.id});
                 index[table.id] = populateSubtable(T, &sub_alloc, table.rows);
             }
 
@@ -318,7 +319,7 @@ fn innerPopulateSubtable(comptime T: type, alloc: *SubTableAlloc(T), subtable_ad
     var subtable = alloc.get(subtable_addr);
 
     for (nodes) |node| {
-        const data = node.getValue() orelse @panic("Trying to use a huffmancode with an uninitalized");
+        const data = node.getValue() orelse break;
         if (TABLE_CUTTOFF == data.len) {
             subtable[node.code] = Entry(T){ .val = data };
         } else if (TABLE_CUTTOFF > data.len) {

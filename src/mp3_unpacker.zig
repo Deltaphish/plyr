@@ -9,8 +9,14 @@ const BitReaderWrapper = struct {
 
     pub fn read(self: *BitReaderWrapper, comptime T: type) !T {
         return switch (@typeInfo(T)) {
-            .bool => (self.internal.readBits(1) orelse @panic("Out of input")) == 1,
-            .int => @intCast(self.internal.readBits(@sizeOf(T)) orelse @panic("Out of input")),
+            .bool => {
+                defer _ = self.internal.walkForward(1);
+                return (self.internal.readBits(1) orelse @panic("Out of input")) == 1;
+            },
+            .int => {
+                defer _ = self.internal.walkForward(@sizeOf(T));
+                return @truncate(self.internal.readBits(@sizeOf(T)) orelse @panic("Out of input"));
+            },
             else => std.debug.panic("Can't deserialize type {}", .{T}),
         };
     }
@@ -39,12 +45,13 @@ fn parse_mpeg1_stereo_data(data: []const u8) !mp3_t.MP3_SIDE_INFO {
 
     var granules: [2][2]mp3_t.MP3_GRANULE_MPEG1 = undefined;
 
-    for (0..1) |gr| {
-        for (0..1) |ch| {
+    for (0..2) |gr| {
+        for (0..2) |ch| {
             const part2_3_lenght = try b.read(u12);
             const big_values = try b.read(u9);
             const global_gain = try b.read(u8);
             const scalefac_compress = try b.read(u4);
+            std.debug.print("scalefac_compress {}\n", .{scalefac_compress});
             const window_switching_flag = try b.read(bool);
 
             //TODO use initializer
@@ -85,7 +92,6 @@ fn parse_mpeg1_stereo_data(data: []const u8) !mp3_t.MP3_SIDE_INFO {
             const preflag = try b.read(bool);
             const scalefac_scale = try b.read(bool);
             const count1table_select = try b.read(bool);
-
             granules[gr][ch] = mp3_t.MP3_GRANULE_MPEG1{
                 .part2_3_length = part2_3_lenght,
                 .big_values = big_values,

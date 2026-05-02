@@ -25,6 +25,7 @@ pub fn main(init: std.process.Init) !void {
     };
 
     const alloc = init.gpa;
+    const huffman_tables = mp3_tables.Decoder.init(alloc);
 
     var buffer = [_]u8{0} ** 2332227;
 
@@ -39,7 +40,6 @@ pub fn main(init: std.process.Init) !void {
         }
 
         const mp3_data = buffer[(tag.header.size + 10)..];
-        const huffman_tables = mp3_tables.Decoder.init(alloc);
 
         var decoder = try mp3_decode.DecoderState.init(huffman_tables, mp3_data);
 

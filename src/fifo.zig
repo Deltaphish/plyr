@@ -1,4 +1,4 @@
-pub fn RingBufferStatic(comptime T: type, comptime size: comptime_int) type {
+pub fn FifoQueue(comptime T: type, comptime size: comptime_int) type {
     return struct {
         const Self = @This();
 
@@ -31,11 +31,11 @@ pub fn RingBufferStatic(comptime T: type, comptime size: comptime_int) type {
     };
 }
 
-test "Ring buffer" {
+test "FIFO Queue" {
     const expect = @import("std").testing.expect;
 
     var buffer: [3]u32 = @splat(0);
-    var ring = RingBufferStatic(u32).init(buffer[0..]);
+    var ring = FifoQueue(u32).init(buffer[0..]);
     ring.push(1);
     ring.push(2);
     ring.push(3);
